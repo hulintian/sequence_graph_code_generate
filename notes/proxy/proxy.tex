@@ -1,0 +1,74 @@
+\documentclass[hyperref,a4paper,UTF8, 12pt]{ctexart}
+
+\usepackage[left=2.50cm, right=2.50cm, top=2.50cm, bottom=2.50cm]{geometry}
+
+\usepackage[unicode=true,colorlinks,urlcolor=blue,linkcolor=blue,bookmarksnumbered=true]{hyperref}
+\usepackage{latexsym,amssymb,amsmath,amsbsy,amsopn,amstext,amsthm,amsxtra,color,bm,calc,ifpdf}
+\usepackage{graphicx}
+\usepackage{enumerate}
+\usepackage{fancyhdr}
+\usepackage{listings}
+\usepackage{multirow}
+\usepackage{makeidx}
+\usepackage{xcolor}
+\usepackage{fontspec}
+\usepackage{subfigure}
+\usepackage{hyperref}
+% \usepackage{pythonhighlight}
+
+\title{基于顺序图的代码生成编译技术}
+\date{}
+
+\begin{document}
+\maketitle
+
+% 主线：实现一个将SysML生成C++/Java语言的一个Eclipse插件
+\section{项目目标}
+本项目旨在构建一个从SysML顺序图到C++源代码的自动化生成工具链，实现系统行为模型的可执行化转化。通过对SysML顺序图的结构化解析、行为逻辑提取和模板化代码生成，完成模型到代码的快速生成，减少人工编码工作量，提升系统设计与实现的一致性。
+
+\section{技术要求}
+
+系统需实现从SysML顺序图自动解析行为逻辑，通过Python+Jinja2模板生成可编译的C++源代码，保证逻辑一致、结构清晰、运行稳定、可扩展性强。并支持在保持既有代码结构的前提下进行增量式代码生成，方便与人工编写代码协同开发。系统应支持以下功能：
+  \begin{enumerate}
+    \item 支持解析SysML顺序图，可正确读取并解析参与者（Lifeline）和消息（Message）等基本要素。
+    \item 能够解析并记录顺序图中的逻辑顺序和控制结构；
+    \item 支持将从顺序图中提取出来的逻辑结构和控制结构生成相应的C++的代码；
+    \item 支持人工对生成代码的补充；
+    \item 支持增量式的修改，修改顺序图后重新生成代码不影响人工写的代码；
+    \item 生成的 C++ 代码应符合命名规范、缩进规范和语法标准，生成后可通过 clang-format 自动格式化。
+  \end{enumerate}
+
+\section{技术指标}
+
+乙方所交付的软件系统应满足以下技术指标。
+
+\begin{enumerate}
+  \item 系统能正确解析 SysML 顺序图文件（XMI/XML 格式），识别 Lifeline 与 Message 等要素；
+  \item 支持生成包含分支、循环等基本控制结构的C++17源代码；
+  \item 支持用户代码保护区机制，重新生成代码时不覆盖人工编写部分，实现增量式更新；
+  \item 生成代码结构清晰、缩进规范，经 clang-format 格式化后可读性良好。
+\end{enumerate}
+
+\section{技术支持}
+
+乙方应在项目开发与交付过程中，向甲方开发人员提供系统化的技术培训与支持，确保甲方具备系统后期独立维护与二次开发能力。培训内容应覆盖本项目涉及的代码生成与编译技术的核心知识，包括但不限于：
+\begin{enumerate}
+  \item 代码编辑与编译模块的技术原理；
+  \item 代码生成机制；
+  \item 生成代码与人工编写代码协同开发。
+\end{enumerate}
+
+% \section{系统集成}
+% 
+% 乙方应基于甲方现有的软件开发平台，采用二次定制开发方式，将代码生成编辑器以插件形式进行集成，实现系统间的无缝对接与功能统一。集成后，用户可在统一的软件环境中完成源代码的快速编辑、编译与调试操作。
+
+\section{进度要求}
+\begin{itemize}
+  \item 2026年4月30号完成项目测试并验收。完成技术研究报告。
+\end{itemize}
+
+\section{交付物}
+
+技术研究报告、源代码集成文档测试大纲测试报告、项目验收总结报告。
+
+\end{document}
