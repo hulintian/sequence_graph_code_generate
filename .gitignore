@@ -2,3 +2,4 @@ reference_code
 tests
 tmp
 **/build
+.vscode
