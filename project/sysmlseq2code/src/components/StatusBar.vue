@@ -12,7 +12,9 @@ const store = useDiagramStore()
       {{ store.isDirty ? '已修改' : '已保存' }}
     </span>
     <span class="status-sep">|</span>
-    <span class="status-item">缩放: {{ Math.round(store.viewState.zoom * 100) }}%</span>
+    <span class="status-item">画布: {{ Math.round(store.viewState.zoom * 100) }}%</span>
+    <span class="status-sep">|</span>
+    <span class="status-item">全局: {{ Math.round(store.appZoom * 100) }}%</span>
     <span class="status-sep">|</span>
     <span class="status-item">元素: {{ store.elementCount }}</span>
     <span class="spacer"></span>

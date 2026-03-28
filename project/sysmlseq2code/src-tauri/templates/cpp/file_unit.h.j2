@@ -1,0 +1,52 @@
+// Auto-generated from SysML Sequence Diagram: {{ diagram.diagram_name }}
+// DO NOT EDIT outside of user-code regions
+#pragma once
+{%- if class.std_includes %}
+{% for inc in class.std_includes %}
+#include {{ inc }}
+{%- endfor %}
+{%- endif %}
+{%- if class.dependencies %}
+{% for dep in class.dependencies %}
+#include "{{ dep }}.h"
+{%- endfor %}
+{%- endif %}
+
+// <user-code-begin {{ class.name }}::includes>
+
+// <user-code-end {{ class.name }}::includes>
+{%- if namespace %}
+
+namespace {{ namespace }} {
+{%- endif %}
+
+class {{ class.name }} {
+public:
+{%- for method in class.methods %}
+{%- if not method.is_self_call %}
+    {{ method.return_type }} {{ method.name }}({% for p in method.params %}{{ p.param_type }} {{ p.name }}{% if not loop.last %}, {% endif %}{% endfor %});
+{%- endif %}
+{%- endfor %}
+
+    // <user-code-begin {{ class.name }}::public_members>
+
+    // <user-code-end {{ class.name }}::public_members>
+
+private:
+{%- for method in class.methods %}
+{%- if method.is_self_call %}
+    {{ method.return_type }} {{ method.name }}({% for p in method.params %}{{ p.param_type }} {{ p.name }}{% if not loop.last %}, {% endif %}{% endfor %});
+{%- endif %}
+{%- endfor %}
+{%- for dep in class.dependencies %}
+    {{ dep }} {{ dep | lower }}_;
+{%- endfor %}
+
+    // <user-code-begin {{ class.name }}::private_members>
+
+    // <user-code-end {{ class.name }}::private_members>
+};
+{%- if namespace %}
+
+} // namespace {{ namespace }}
+{%- endif %}

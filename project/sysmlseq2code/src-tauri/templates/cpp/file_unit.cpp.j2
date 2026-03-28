@@ -1,0 +1,25 @@
+// Auto-generated from SysML Sequence Diagram: {{ diagram.diagram_name }}
+// DO NOT EDIT outside of user-code regions
+#include "{{ class.name }}.h"
+{%- if namespace %}
+
+namespace {{ namespace }} {
+{%- endif %}
+{% for method in class.methods %}
+
+{{ method.return_type }} {{ class.name }}::{{ method.name }}({% for p in method.params %}{{ p.param_type }} {{ p.name }}{% if not loop.last %}, {% endif %}{% endfor %}) {
+    // <user-code-begin {{ class.name }}::{{ method.name }}::pre>
+
+    // <user-code-end {{ class.name }}::{{ method.name }}::pre>
+{% for stmt in method.body %}
+{{ render_stmt(stmt, "    ") }}
+{% endfor %}
+    // <user-code-begin {{ class.name }}::{{ method.name }}::post>
+
+    // <user-code-end {{ class.name }}::{{ method.name }}::post>
+}
+{%- endfor %}
+{%- if namespace %}
+
+} // namespace {{ namespace }}
+{%- endif %}

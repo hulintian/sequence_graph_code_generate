@@ -5,13 +5,6 @@ import { computed } from 'vue'
 const store = useDiagramStore()
 const message = computed(() => store.selectedMessage)
 
-const sourceLifelineName = computed(() =>
-  store.lifelines.find(l => l.id === message.value?.sourceLifelineId)?.name ?? '?'
-)
-const targetLifelineName = computed(() =>
-  store.lifelines.find(l => l.id === message.value?.targetLifelineId)?.name ?? '?'
-)
-
 function updateName(e: Event) {
   const val = (e.target as HTMLInputElement).value
   if (message.value) {
@@ -49,6 +42,24 @@ function updateArguments(e: Event) {
     return { name: parts[0] || '', type: parts[1] || 'void' }
   })
   store.updateMessage(message.value.id, { arguments: args })
+}
+
+function updateSource(e: Event) {
+  const val = (e.target as HTMLSelectElement).value
+  if (message.value) store.updateMessage(message.value.id, { sourceLifelineId: val })
+}
+
+function updateTarget(e: Event) {
+  const val = (e.target as HTMLSelectElement).value
+  if (message.value) store.updateMessage(message.value.id, { targetLifelineId: val })
+}
+
+function moveUp() {
+  if (message.value) store.moveMessageOrder(message.value.id, 'up')
+}
+
+function moveDown() {
+  if (message.value) store.moveMessageOrder(message.value.id, 'down')
 }
 
 const argsString = computed(() =>
@@ -94,19 +105,24 @@ const argsString = computed(() =>
              placeholder="如 [isValid]" />
     </label>
 
-    <div class="info-row">
+    <label>
       <span>来源</span>
-      <span class="info-value">{{ sourceLifelineName }}</span>
-    </div>
+      <select :value="message.sourceLifelineId" @change="updateSource">
+        <option v-for="ll in store.lifelines" :key="ll.id" :value="ll.id">{{ ll.name }}</option>
+      </select>
+    </label>
 
-    <div class="info-row">
+    <label>
       <span>目标</span>
-      <span class="info-value">{{ targetLifelineName }}</span>
-    </div>
+      <select :value="message.targetLifelineId" @change="updateTarget">
+        <option v-for="ll in store.lifelines" :key="ll.id" :value="ll.id">{{ ll.name }}</option>
+      </select>
+    </label>
 
-    <div class="info-row">
-      <span>顺序</span>
-      <span class="info-value">#{{ message.orderIndex }}</span>
+    <div class="order-controls">
+      <span class="order-label">顺序 #{{ message.orderIndex }}</span>
+      <button class="order-btn" @click="moveUp" title="上移">^</button>
+      <button class="order-btn" @click="moveDown" title="下移">v</button>
     </div>
   </div>
 </template>
@@ -146,19 +162,34 @@ input:focus, select:focus {
   border-color: #4b7bff;
 }
 
-.info-row {
+.order-controls {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 6px;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.order-label {
   font-size: 12px;
-}
-
-.info-row span:first-child {
   color: #888;
+  flex: 1;
 }
 
-.info-value {
-  color: #aaa;
+.order-btn {
+  width: 28px;
+  height: 28px;
+  background: #3c3f41;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #ccc;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.order-btn:hover {
+  background: #4c4f51;
 }
 </style>

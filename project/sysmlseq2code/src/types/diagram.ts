@@ -27,6 +27,7 @@ export interface Message {
   sourceLifelineId: string
   targetLifelineId: string
   orderIndex: number
+  customY: number | null
   arguments: MessageArgument[]
   returnType: string
   guard: string
@@ -44,6 +45,13 @@ export interface CombinedFragment {
   type: 'alt' | 'loop' | 'opt' | 'par' | 'break'
   parentFragmentId: string | null
   operands: FragmentOperand[]
+  // Stored geometry (set when created via drag, resizable later)
+  x: number
+  y: number
+  width: number
+  height: number
+  // For ALT: ratio (0~1) of divider position within the fragment height
+  dividerRatio: number
 }
 
 export interface ViewState {

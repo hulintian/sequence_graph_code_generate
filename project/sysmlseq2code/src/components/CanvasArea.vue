@@ -26,6 +26,26 @@ const isDraggingLifeline = ref(false)
 const dragLifelineId = ref<string | null>(null)
 const dragOffsetX = ref(0)
 
+// Fragment drawing state (drag rectangle to select messages)
+const isDrawingFragment = ref(false)
+const fragmentDrawStart = ref({ x: 0, y: 0 })
+const fragmentDrawEnd = ref({ x: 0, y: 0 })
+
+// Message vertical drag state
+const isDraggingMessage = ref(false)
+const dragMessageId = ref<string | null>(null)
+
+// Fragment resize state
+const isResizingFragment = ref(false)
+const resizeFragmentId = ref<string | null>(null)
+const resizeEdge = ref<'n' | 's' | 'e' | 'w' | null>(null)
+const resizeStartMouse = ref({ x: 0, y: 0 })
+const resizeStartRect = ref({ x: 0, y: 0, width: 0, height: 0 })
+
+// ALT divider drag state
+const isDraggingDivider = ref(false)
+const dividerFragmentId = ref<string | null>(null)
+
 // Message Y positions
 const messageBaseY = 140
 const messageSpacing = 50
@@ -34,34 +54,73 @@ const messageYPositions = computed(() => {
   const positions: Record<string, number> = {}
   const sorted = [...store.messages].sort((a, b) => a.orderIndex - b.orderIndex)
   sorted.forEach((msg, i) => {
-    positions[msg.id] = messageBaseY + i * messageSpacing
+    positions[msg.id] = msg.customY ?? (messageBaseY + i * messageSpacing)
   })
   return positions
 })
 
-// Fragment layout
-const fragmentLayouts = computed(() => {
-  return store.combinedFragments.map(frag => {
-    const msgIds = frag.operands.flatMap(op => op.messageIds)
-    const fragMessages = store.messages.filter(m => msgIds.includes(m.id))
-    if (fragMessages.length === 0) {
-      return { fragment: frag, baseY: messageBaseY, height: messageSpacing, minX: 100, maxX: 300 }
-    }
-
-    const ys = fragMessages.map(m => messageYPositions.value[m.id] ?? messageBaseY)
-    const lifelineIds = new Set(fragMessages.flatMap(m => [m.sourceLifelineId, m.targetLifelineId]))
-    const xs = store.lifelines
-      .filter(l => lifelineIds.has(l.id))
-      .map(l => l.position.x)
-
-    return {
-      fragment: frag,
-      baseY: Math.min(...ys),
-      height: Math.max(...ys) - Math.min(...ys) + messageSpacing,
-      minX: xs.length > 0 ? Math.min(...xs) : 100,
-      maxX: xs.length > 0 ? Math.max(...xs) : 300
-    }
+// Activation bars (execution specifications) — based on call-return pairs only
+const activationBars = computed(() => {
+  const bars: { lifelineId: string; x: number; topY: number; bottomY: number }[] = []
+  const sorted = [...store.messages].sort((a, b) => {
+    const ya = messageYPositions.value[a.id] ?? 0
+    const yb = messageYPositions.value[b.id] ?? 0
+    return ya - yb
   })
+
+  for (const ll of store.lifelines) {
+    // Find each incoming call (non-return) to this lifeline
+    for (let i = 0; i < sorted.length; i++) {
+      const msg = sorted[i]
+      if (msg.targetLifelineId !== ll.id || msg.type === 'return') continue
+
+      const topY = messageYPositions.value[msg.id] ?? messageBaseY
+
+      // Find matching return: this lifeline sends a return back to the caller
+      let bottomY = topY + 20 // minimum height if no return found
+      for (let j = i + 1; j < sorted.length; j++) {
+        const next = sorted[j]
+        if (
+          next.sourceLifelineId === ll.id &&
+          next.targetLifelineId === msg.sourceLifelineId &&
+          next.type === 'return'
+        ) {
+          bottomY = messageYPositions.value[next.id] ?? bottomY
+          break
+        }
+      }
+
+      // Also extend to cover any outgoing calls this lifeline makes during the activation
+      for (let j = i + 1; j < sorted.length; j++) {
+        const next = sorted[j]
+        // Stop at the return
+        if (next.sourceLifelineId === ll.id && next.targetLifelineId === msg.sourceLifelineId && next.type === 'return') break
+        if (next.sourceLifelineId === ll.id && next.type !== 'return') {
+          const nextY = messageYPositions.value[next.id] ?? 0
+          if (nextY > bottomY) bottomY = nextY + 4
+        }
+      }
+
+      bars.push({
+        lifelineId: ll.id,
+        x: ll.position.x,
+        topY,
+        bottomY,
+      })
+    }
+  }
+  return bars
+})
+
+// Fragment layout — uses stored geometry from CombinedFragment
+const fragmentLayouts = computed(() => {
+  return store.combinedFragments.map(frag => ({
+    fragment: frag,
+    x: frag.x,
+    y: frag.y,
+    width: frag.width,
+    height: frag.height,
+  }))
 })
 
 function getSvgPoint(e: MouseEvent): { x: number; y: number } {
@@ -120,6 +179,13 @@ function handleCanvasMouseDown(e: MouseEvent) {
     return
   }
 
+  if (tool === 'alt' || tool === 'loop' || tool === 'opt' || tool === 'par') {
+    isDrawingFragment.value = true
+    fragmentDrawStart.value = { x: pt.x, y: pt.y }
+    fragmentDrawEnd.value = { x: pt.x, y: pt.y }
+    return
+  }
+
   if (tool === 'sync-message' || tool === 'async-message' || tool === 'return-message') {
     const lifelineId = findLifelineAtX(pt.x)
     if (lifelineId) {
@@ -146,7 +212,7 @@ function handleCanvasMouseDown(e: MouseEvent) {
       }
     }
 
-    // Check if clicking on a message line
+    // Check if clicking on a message line (drag to move vertically)
     for (const msg of store.messages) {
       const my = messageYPositions.value[msg.id] ?? messageBaseY
       const src = store.lifelines.find(l => l.id === msg.sourceLifelineId)
@@ -156,21 +222,53 @@ function handleCanvasMouseDown(e: MouseEvent) {
         const maxX = Math.max(src.position.x, tgt.position.x)
         if (pt.x >= minX - 10 && pt.x <= maxX + 10) {
           store.selectElement(msg.id, 'message')
+          isDraggingMessage.value = true
+          dragMessageId.value = msg.id
           return
         }
       }
     }
 
-    // Check if clicking on a fragment border
+    // Check if clicking on fragment edges (resize) or ALT divider
+    const edgeThreshold = 8
     for (const fl of fragmentLayouts.value) {
-      const fx = fl.minX - 20
-      const fy = fl.baseY - 20
-      const fw = fl.maxX - fl.minX + 40
-      const fh = fl.height + 40
-      if (pt.x >= fx && pt.x <= fx + fw && pt.y >= fy && pt.y <= fy + fh) {
+      const fx = fl.x, fy = fl.y, fw = fl.width, fh = fl.height
+      const inside = pt.x >= fx - edgeThreshold && pt.x <= fx + fw + edgeThreshold &&
+                     pt.y >= fy - edgeThreshold && pt.y <= fy + fh + edgeThreshold
+
+      if (!inside) continue
+
+      // ALT divider drag check
+      if (fl.fragment.type === 'alt' && fl.fragment.operands.length > 1) {
+        const divY = fy + fh * fl.fragment.dividerRatio
+        if (Math.abs(pt.y - divY) < edgeThreshold && pt.x >= fx && pt.x <= fx + fw) {
+          isDraggingDivider.value = true
+          dividerFragmentId.value = fl.fragment.id
+          store.selectElement(fl.fragment.id, 'fragment')
+          return
+        }
+      }
+
+      // Edge resize detection
+      let edge: 'n' | 's' | 'e' | 'w' | null = null
+      if (Math.abs(pt.y - fy) < edgeThreshold && pt.x >= fx && pt.x <= fx + fw) edge = 'n'
+      else if (Math.abs(pt.y - (fy + fh)) < edgeThreshold && pt.x >= fx && pt.x <= fx + fw) edge = 's'
+      else if (Math.abs(pt.x - fx) < edgeThreshold && pt.y >= fy && pt.y <= fy + fh) edge = 'w'
+      else if (Math.abs(pt.x - (fx + fw)) < edgeThreshold && pt.y >= fy && pt.y <= fy + fh) edge = 'e'
+
+      if (edge) {
+        isResizingFragment.value = true
+        resizeFragmentId.value = fl.fragment.id
+        resizeEdge.value = edge
+        resizeStartMouse.value = { x: pt.x, y: pt.y }
+        resizeStartRect.value = { x: fx, y: fy, width: fw, height: fh }
         store.selectElement(fl.fragment.id, 'fragment')
         return
       }
+
+      // Click inside fragment body — select it
+      store.selectElement(fl.fragment.id, 'fragment')
+      return
     }
 
     // Click on empty space: clear selection
@@ -185,9 +283,60 @@ function handleCanvasMouseMove(e: MouseEvent) {
     return
   }
 
+  if (isDrawingFragment.value) {
+    const pt = getSvgPoint(e)
+    fragmentDrawEnd.value = { x: pt.x, y: pt.y }
+    return
+  }
+
   if (isDrawingMessage.value) {
     const pt = getSvgPoint(e)
     messageDrawEnd.value = { x: pt.x, y: pt.y }
+    return
+  }
+
+  if (isDraggingMessage.value && dragMessageId.value) {
+    const pt = getSvgPoint(e)
+    const msg = store.messages.find(m => m.id === dragMessageId.value)
+    if (msg) {
+      msg.customY = Math.max(messageBaseY, pt.y)
+    }
+    return
+  }
+
+  if (isResizingFragment.value && resizeFragmentId.value) {
+    const pt = getSvgPoint(e)
+    const frag = store.combinedFragments.find(f => f.id === resizeFragmentId.value)
+    if (frag) {
+      const dx = pt.x - resizeStartMouse.value.x
+      const dy = pt.y - resizeStartMouse.value.y
+      const minSize = 60
+      if (resizeEdge.value === 'n') {
+        const newY = resizeStartRect.value.y + dy
+        const newH = resizeStartRect.value.height - dy
+        if (newH >= minSize) { frag.y = newY; frag.height = newH }
+      } else if (resizeEdge.value === 's') {
+        frag.height = Math.max(minSize, resizeStartRect.value.height + dy)
+      } else if (resizeEdge.value === 'w') {
+        const newX = resizeStartRect.value.x + dx
+        const newW = resizeStartRect.value.width - dx
+        if (newW >= minSize) { frag.x = newX; frag.width = newW }
+      } else if (resizeEdge.value === 'e') {
+        frag.width = Math.max(minSize, resizeStartRect.value.width + dx)
+      }
+      store.isDirty = true
+    }
+    return
+  }
+
+  if (isDraggingDivider.value && dividerFragmentId.value) {
+    const pt = getSvgPoint(e)
+    const frag = store.combinedFragments.find(f => f.id === dividerFragmentId.value)
+    if (frag) {
+      const ratio = Math.max(0.1, Math.min(0.9, (pt.y - frag.y) / frag.height))
+      frag.dividerRatio = ratio
+      store.isDirty = true
+    }
     return
   }
 
@@ -205,6 +354,59 @@ function handleCanvasMouseUp(e: MouseEvent) {
     return
   }
 
+  if (isDrawingFragment.value) {
+    isDrawingFragment.value = false
+    // Find all messages within the dragged rectangle
+    const x1 = Math.min(fragmentDrawStart.value.x, fragmentDrawEnd.value.x)
+    const x2 = Math.max(fragmentDrawStart.value.x, fragmentDrawEnd.value.x)
+    const y1 = Math.min(fragmentDrawStart.value.y, fragmentDrawEnd.value.y)
+    const y2 = Math.max(fragmentDrawStart.value.y, fragmentDrawEnd.value.y)
+
+    const selectedMsgIds: string[] = []
+    for (const msg of store.messages) {
+      const my = messageYPositions.value[msg.id] ?? messageBaseY
+      const src = store.lifelines.find(l => l.id === msg.sourceLifelineId)
+      const tgt = store.lifelines.find(l => l.id === msg.targetLifelineId)
+      if (src && tgt) {
+        const mx = (src.position.x + tgt.position.x) / 2
+        if (mx >= x1 && mx <= x2 && my >= y1 && my <= y2) {
+          selectedMsgIds.push(msg.id)
+        }
+      }
+    }
+
+    const fragType = store.activeTool as 'alt' | 'loop' | 'opt' | 'par'
+    const fragRect = { x: x1, y: y1, width: x2 - x1, height: y2 - y1 }
+    store.addCombinedFragment(fragType, selectedMsgIds, fragRect)
+    // Link messages inside the rectangle to this fragment
+    const newFrag = store.combinedFragments[store.combinedFragments.length - 1]
+    for (const mid of selectedMsgIds) {
+      const msg = store.messages.find(m => m.id === mid)
+      if (msg) msg.parentFragmentId = newFrag.id
+    }
+    store.setTool('select')
+    return
+  }
+
+  if (isDraggingMessage.value) {
+    isDraggingMessage.value = false
+    dragMessageId.value = null
+    return
+  }
+
+  if (isResizingFragment.value) {
+    isResizingFragment.value = false
+    resizeFragmentId.value = null
+    resizeEdge.value = null
+    return
+  }
+
+  if (isDraggingDivider.value) {
+    isDraggingDivider.value = false
+    dividerFragmentId.value = null
+    return
+  }
+
   if (isDraggingLifeline.value) {
     isDraggingLifeline.value = false
     dragLifelineId.value = null
@@ -214,14 +416,26 @@ function handleCanvasMouseUp(e: MouseEvent) {
   if (isDrawingMessage.value && messageDrawStart.value) {
     const pt = getSvgPoint(e)
     const targetId = findLifelineAtX(pt.x)
-    if (targetId && targetId !== messageDrawStart.value.lifelineId) {
+    if (targetId) {
       const msgType = store.activeTool === 'async-message' ? 'async'
         : store.activeTool === 'return-message' ? 'return' : 'sync'
+      const drawY = messageDrawStart.value.y
       store.addMessage(messageDrawStart.value.lifelineId, targetId, msgType)
-      store.setTool('select')
-    } else if (targetId && targetId === messageDrawStart.value.lifelineId) {
-      // Self-call
-      store.addMessage(messageDrawStart.value.lifelineId, targetId, 'sync')
+      // Set customY to where the user drew the line
+      const newMsg = store.messages[store.messages.length - 1]
+      newMsg.customY = Math.max(messageBaseY, drawY)
+      // Auto-assign parentFragmentId based on geometric containment
+      const msgY = newMsg.customY
+      for (const frag of store.combinedFragments) {
+        if (msgY >= frag.y && msgY <= frag.y + frag.height &&
+            pt.x >= frag.x && pt.x <= frag.x + frag.width) {
+          newMsg.parentFragmentId = frag.id
+          if (frag.operands.length > 0 && !frag.operands[0].messageIds.includes(newMsg.id)) {
+            frag.operands[0].messageIds.push(newMsg.id)
+          }
+          break
+        }
+      }
       store.setTool('select')
     }
     isDrawingMessage.value = false
@@ -252,9 +466,17 @@ function handleKeyDown(e: KeyboardEvent) {
   if (e.ctrlKey || e.metaKey) {
     if (e.key === 'z') { e.preventDefault(); store.undo() }
     if (e.key === 'y') { e.preventDefault(); store.redo() }
-    if (e.key === '0') { e.preventDefault(); store.setZoom(1); store.setPan(0, 0) }
-    if (e.key === '=' || e.key === '+') { e.preventDefault(); store.setZoom(store.viewState.zoom + 0.1) }
-    if (e.key === '-') { e.preventDefault(); store.setZoom(store.viewState.zoom - 0.1) }
+    if (e.shiftKey) {
+      // Ctrl+Shift +/-/0: 全局缩放（整个界面）
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); store.setAppZoom(store.appZoom + 0.1) }
+      if (e.key === '_' || e.key === '-') { e.preventDefault(); store.setAppZoom(store.appZoom - 0.1) }
+      if (e.key === ')' || e.key === '0') { e.preventDefault(); store.setAppZoom(1) }
+    } else {
+      // Ctrl +/-/0: 仅画布缩放
+      if (e.key === '0') { e.preventDefault(); store.setZoom(1); store.setPan(0, 0) }
+      if (e.key === '=' || e.key === '+') { e.preventDefault(); store.setZoom(store.viewState.zoom + 0.1) }
+      if (e.key === '-') { e.preventDefault(); store.setZoom(store.viewState.zoom - 0.1) }
+    }
   }
 }
 
@@ -285,9 +507,13 @@ const drawStartLifeline = computed(() => {
       @wheel="handleWheel"
       :style="{
         cursor: isPanning ? 'grabbing'
+          : isResizingFragment ? (resizeEdge === 'n' || resizeEdge === 's' ? 'ns-resize' : 'ew-resize')
+          : isDraggingDivider ? 'row-resize'
           : store.activeTool === 'lifeline' ? 'crosshair'
           : (store.activeTool.endsWith('-message') || store.activeTool === 'sync-message') ? 'crosshair'
+          : ['alt','loop','opt','par'].includes(store.activeTool) ? 'crosshair'
           : isDraggingLifeline ? 'ew-resize'
+          : isDrawingFragment ? 'crosshair'
           : 'default'
       }"
     >
@@ -300,10 +526,6 @@ const drawStartLifeline = computed(() => {
           v-for="fl in fragmentLayouts"
           :key="fl.fragment.id"
           :fragment="fl.fragment"
-          :baseY="fl.baseY"
-          :height="fl.height"
-          :minX="fl.minX"
-          :maxX="fl.maxX"
         />
 
         <!-- Lifelines -->
@@ -312,6 +534,20 @@ const drawStartLifeline = computed(() => {
           :key="ll.id"
           :lifeline="ll"
           :canvasHeight="canvasHeight"
+        />
+
+        <!-- Activation bars (execution specifications) -->
+        <rect
+          v-for="(bar, idx) in activationBars"
+          :key="'act-' + idx"
+          :x="bar.x - 5"
+          :y="bar.topY"
+          :width="10"
+          :height="Math.max(bar.bottomY - bar.topY, 10)"
+          fill="#3c3f41"
+          stroke="#666"
+          stroke-width="1"
+          rx="1"
         />
 
         <!-- Arrow markers -->
@@ -339,13 +575,27 @@ const drawStartLifeline = computed(() => {
         <line
           v-if="isDrawingMessage && drawStartLifeline"
           :x1="drawStartLifeline.position.x"
-          :y1="messageBaseY + store.messages.length * messageSpacing"
+          :y1="messageDrawStart?.y ?? 0"
           :x2="messageDrawEnd.x"
-          :y2="messageBaseY + store.messages.length * messageSpacing"
+          :y2="messageDrawStart?.y ?? 0"
           stroke="#4b7bff"
           stroke-width="1.5"
           stroke-dasharray="4,4"
           marker-end="url(#arrow-filled-blue)"
+          pointer-events="none"
+        />
+
+        <!-- Fragment selection rectangle preview -->
+        <rect
+          v-if="isDrawingFragment"
+          :x="Math.min(fragmentDrawStart.x, fragmentDrawEnd.x)"
+          :y="Math.min(fragmentDrawStart.y, fragmentDrawEnd.y)"
+          :width="Math.abs(fragmentDrawEnd.x - fragmentDrawStart.x)"
+          :height="Math.abs(fragmentDrawEnd.y - fragmentDrawStart.y)"
+          fill="rgba(75, 123, 255, 0.1)"
+          stroke="#4b7bff"
+          stroke-width="1.5"
+          stroke-dasharray="6,3"
           pointer-events="none"
         />
       </g>

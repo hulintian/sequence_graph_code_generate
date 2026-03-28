@@ -1,0 +1,40 @@
+{%- macro render_stmt(stmt, indent) -%}
+{%- if stmt.kind == "Call" -%}
+{%- if stmt.is_self_call -%}
+{{ indent }}{{ stmt.method_name }}({{ stmt.arguments | join(", ") }});
+{%- else -%}
+{%- if stmt.return_type != "void" -%}
+{{ indent }}{{ stmt.return_type }} result = {{ stmt.target_class | lower }}_.{{ stmt.method_name }}({{ stmt.arguments | join(", ") }});
+{%- else -%}
+{{ indent }}{{ stmt.target_class | lower }}_.{{ stmt.method_name }}({{ stmt.arguments | join(", ") }});
+{%- endif -%}
+{%- endif -%}
+{%- elif stmt.kind == "If" -%}
+{{ indent }}if ({{ stmt.condition }}) {
+{%- for s in stmt.then_stmts %}
+{{ render_stmt(s, indent ~ "    ") }}
+{%- endfor %}
+{{ indent }}}
+{%- if stmt.else_stmts -%}
+{{ " " }}else {
+{%- for s in stmt.else_stmts %}
+{{ render_stmt(s, indent ~ "    ") }}
+{%- endfor %}
+{{ indent }}}
+{%- endif -%}
+{%- elif stmt.kind == "Loop" -%}
+{{ indent }}while ({{ stmt.condition }}) {
+{%- for s in stmt.body_stmts %}
+{{ render_stmt(s, indent ~ "    ") }}
+{%- endfor %}
+{{ indent }}}
+{%- elif stmt.kind == "Opt" -%}
+{{ indent }}if ({{ stmt.condition }}) {
+{%- for s in stmt.body_stmts %}
+{{ render_stmt(s, indent ~ "    ") }}
+{%- endfor %}
+{{ indent }}}
+{%- elif stmt.kind == "Return" -%}
+{{ indent }}return {{ stmt.value }};
+{%- endif -%}
+{%- endmacro -%}

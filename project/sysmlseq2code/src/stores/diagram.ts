@@ -7,6 +7,7 @@ import type {
 } from '../types/diagram'
 
 let idCounter = 0
+let lifelineCounter = 0
 function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${++idCounter}`
 }
@@ -120,7 +121,7 @@ export const useDiagramStore = defineStore('diagram', () => {
     const id = generateId('ll')
     lifelines.value.push({
       id,
-      name: name ?? `Object${lifelines.value.length + 1}`,
+      name: name ?? `Object${++lifelineCounter}`,
       type: 'class',
       position: { x, y: 60 },
       properties: {
@@ -148,6 +149,7 @@ export const useDiagramStore = defineStore('diagram', () => {
       sourceLifelineId: sourceId,
       targetLifelineId: targetId,
       orderIndex,
+      customY: null,
       arguments: [],
       returnType: 'void',
       guard: '',
@@ -158,22 +160,29 @@ export const useDiagramStore = defineStore('diagram', () => {
 
   function addCombinedFragment(
     type: 'alt' | 'loop' | 'opt' | 'par',
-    messageIds: string[]
+    messageIds: string[],
+    rect?: { x: number; y: number; width: number; height: number }
   ) {
     pushUndo()
     const id = generateId('cf')
+    const defaultGuard = type === 'loop' ? 'i < n' : type === 'alt' ? 'condition' : 'condition'
     const operands = type === 'alt'
       ? [
-          { id: generateId('op'), guard: 'condition', messageIds },
+          { id: generateId('op'), guard: defaultGuard, messageIds },
           { id: generateId('op'), guard: 'else', messageIds: [] }
         ]
-      : [{ id: generateId('op'), guard: 'condition', messageIds }]
+      : [{ id: generateId('op'), guard: defaultGuard, messageIds }]
 
     combinedFragments.value.push({
       id,
       type,
       parentFragmentId: null,
-      operands
+      operands,
+      x: rect?.x ?? 80,
+      y: rect?.y ?? 120,
+      width: rect?.width ?? 240,
+      height: rect?.height ?? 120,
+      dividerRatio: 0.5
     })
     selectElement(id, 'fragment')
   }
@@ -192,6 +201,18 @@ export const useDiagramStore = defineStore('diagram', () => {
     if (idx !== -1) {
       messages.value[idx] = { ...messages.value[idx], ...updates }
     }
+  }
+
+  function moveMessageOrder(id: string, direction: 'up' | 'down') {
+    const sorted = [...messages.value].sort((a, b) => a.orderIndex - b.orderIndex)
+    const idx = sorted.findIndex(m => m.id === id)
+    if (idx < 0) return
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+    if (swapIdx < 0 || swapIdx >= sorted.length) return
+    pushUndo()
+    const tmpOrder = sorted[idx].orderIndex
+    sorted[idx].orderIndex = sorted[swapIdx].orderIndex
+    sorted[swapIdx].orderIndex = tmpOrder
   }
 
   function updateFragment(id: string, updates: Partial<CombinedFragment>) {
@@ -247,8 +268,14 @@ export const useDiagramStore = defineStore('diagram', () => {
     clearSelection()
   }
 
+  const appZoom = ref(1)
+
   function setZoom(zoom: number) {
     viewState.value.zoom = Math.max(0.25, Math.min(3, zoom))
+  }
+
+  function setAppZoom(zoom: number) {
+    appZoom.value = Math.max(0.25, Math.min(3, zoom))
   }
 
   function setPan(x: number, y: number) {
@@ -298,12 +325,13 @@ export const useDiagramStore = defineStore('diagram', () => {
     redoStack.value = []
     isDirty.value = false
     currentFilePath.value = null
+    lifelineCounter = 0
     clearSelection()
   }
 
   return {
     // State
-    metadata, lifelines, messages, combinedFragments, viewState,
+    metadata, lifelines, messages, combinedFragments, viewState, appZoom,
     selectedElementId, selectedElementType, activeTool, isDirty, currentFilePath,
     undoStack, redoStack,
     // Computed
@@ -311,9 +339,9 @@ export const useDiagramStore = defineStore('diagram', () => {
     // Actions
     selectElement, clearSelection, setTool,
     addLifeline, addMessage, addCombinedFragment,
-    updateLifeline, updateMessage, updateFragment,
+    updateLifeline, updateMessage, moveMessageOrder, updateFragment,
     deleteSelected, undo, redo,
-    setZoom, setPan, moveLifeline,
+    setZoom, setAppZoom, setPan, moveLifeline,
     toJSON, loadFromJSON, newDiagram,
   }
 })

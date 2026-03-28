@@ -1,3 +1,9 @@
+pub mod ir;
+pub mod parser;
+pub mod generator;
+pub mod protected_region;
+pub mod incremental;
+
 use std::fs;
 use std::path::Path;
 
@@ -44,6 +50,60 @@ fn load_diagram(path: String) -> Result<String, String> {
     Ok(content)
 }
 
+#[derive(serde::Serialize)]
+struct GenerationResult {
+    success: bool,
+    files: Vec<incremental::WriteResult>,
+    warnings: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+struct PreviewFile {
+    path: String,
+    content: String,
+}
+
+#[tauri::command]
+fn generate_code(diagram_json: String, output_dir: String, old_version_dir: Option<String>) -> Result<GenerationResult, String> {
+    let input: parser::DiagramInput = serde_json::from_str(&diagram_json)
+        .map_err(|e| format!("Invalid diagram JSON: {}", e))?;
+
+    let ir = parser::parse_diagram(&input)?;
+    let language = &input.metadata.code_gen_config.language;
+    let report = generator::generate(&ir, language)?;
+
+    let write_results = incremental::write_files(
+        &report.files,
+        &output_dir,
+        old_version_dir.as_deref(),
+    )?;
+
+    Ok(GenerationResult {
+        success: true,
+        files: write_results,
+        warnings: report.warnings,
+    })
+}
+
+#[tauri::command]
+fn preview_code(diagram_json: String) -> Result<Vec<PreviewFile>, String> {
+    let input: parser::DiagramInput = serde_json::from_str(&diagram_json)
+        .map_err(|e| format!("Invalid diagram JSON: {}", e))?;
+
+    let ir = parser::parse_diagram(&input)?;
+    let language = &input.metadata.code_gen_config.language;
+    let report = generator::generate(&ir, language)?;
+
+    Ok(report
+        .files
+        .into_iter()
+        .map(|f| PreviewFile {
+            path: f.path,
+            content: f.content,
+        })
+        .collect())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -51,7 +111,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             save_diagram,
-            load_diagram
+            load_diagram,
+            generate_code,
+            preview_code,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

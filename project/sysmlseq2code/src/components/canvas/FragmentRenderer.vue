@@ -5,10 +5,6 @@ import type { CombinedFragment } from '../../types/diagram'
 
 const props = defineProps<{
   fragment: CombinedFragment
-  baseY: number
-  height: number
-  minX: number
-  maxX: number
 }>()
 
 const store = useDiagramStore()
@@ -18,15 +14,17 @@ const isSelected = computed(() =>
   store.selectedElementType === 'fragment'
 )
 
-const padding = 20
-const x = computed(() => props.minX - padding)
-const y = computed(() => props.baseY - 20)
-const width = computed(() => props.maxX - props.minX + padding * 2)
-const height = computed(() => props.height + 40)
+const x = computed(() => props.fragment.x)
+const y = computed(() => props.fragment.y)
+const width = computed(() => props.fragment.width)
+const height = computed(() => props.fragment.height)
 
 const typeLabel = computed(() => props.fragment.type.toUpperCase())
 
-// Click detection handled by CanvasArea
+const dividerY = computed(() => {
+  if (props.fragment.type !== 'alt' || props.fragment.operands.length <= 1) return 0
+  return y.value + height.value * props.fragment.dividerRatio
+})
 </script>
 
 <template>
@@ -40,6 +38,22 @@ const typeLabel = computed(() => props.fragment.type.toUpperCase())
       stroke-width="1.5"
       rx="2"
     />
+
+    <!-- Resize handles (visible when selected) -->
+    <template v-if="isSelected">
+      <!-- North edge -->
+      <line :x1="x" :y1="y" :x2="x + width" :y2="y"
+            stroke="transparent" stroke-width="8" style="cursor: ns-resize" />
+      <!-- South edge -->
+      <line :x1="x" :y1="y + height" :x2="x + width" :y2="y + height"
+            stroke="transparent" stroke-width="8" style="cursor: ns-resize" />
+      <!-- West edge -->
+      <line :x1="x" :y1="y" :x2="x" :y2="y + height"
+            stroke="transparent" stroke-width="8" style="cursor: ew-resize" />
+      <!-- East edge -->
+      <line :x1="x + width" :y1="y" :x2="x + width" :y2="y + height"
+            stroke="transparent" stroke-width="8" style="cursor: ew-resize" />
+    </template>
 
     <!-- Type label pentagon -->
     <polygon
@@ -60,23 +74,33 @@ const typeLabel = computed(() => props.fragment.type.toUpperCase())
     <text
       v-if="fragment.operands.length > 0 && fragment.operands[0].guard"
       :x="x + 78" :y="y + 16"
-      fill="#aaa"
+      fill="#e8a838"
       font-size="11"
+      font-family="monospace"
     >[{{ fragment.operands[0].guard }}]</text>
 
-    <!-- Dashed divider for alt else -->
+    <!-- ALT dashed divider (draggable) -->
     <template v-if="fragment.type === 'alt' && fragment.operands.length > 1">
       <line
-        :x1="x" :y1="y + height / 2"
-        :x2="x + width" :y2="y + height / 2"
+        :x1="x" :y1="dividerY"
+        :x2="x + width" :y2="dividerY"
         stroke="#666"
         stroke-width="1"
         stroke-dasharray="6,4"
       />
+      <!-- Invisible wider hit area for dragging -->
+      <line
+        :x1="x" :y1="dividerY"
+        :x2="x + width" :y2="dividerY"
+        stroke="transparent"
+        stroke-width="10"
+        style="cursor: row-resize"
+      />
       <text
-        :x="x + 8" :y="y + height / 2 + 16"
-        fill="#aaa"
+        :x="x + 8" :y="dividerY + 16"
+        fill="#e8a838"
         font-size="11"
+        font-family="monospace"
       >[{{ fragment.operands[1].guard }}]</text>
     </template>
   </g>
