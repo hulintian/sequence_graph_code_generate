@@ -36,6 +36,18 @@ pub struct Parameter {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IfBranch {
+    pub condition: String,
+    pub stmts: Vec<Statement>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParBranch {
+    pub label: String,
+    pub stmts: Vec<Statement>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum Statement {
     Call {
@@ -48,9 +60,7 @@ pub enum Statement {
         is_self_call: bool,
     },
     If {
-        condition: String,
-        then_stmts: Vec<Statement>,
-        else_stmts: Vec<Statement>,
+        branches: Vec<IfBranch>,
     },
     Loop {
         condition: String,
@@ -59,6 +69,20 @@ pub enum Statement {
     Opt {
         condition: String,
         body_stmts: Vec<Statement>,
+    },
+    Break {
+        condition: String,
+        body_stmts: Vec<Statement>,
+    },
+    Par {
+        branches: Vec<ParBranch>,
+    },
+    Create {
+        target_class: String,
+        arguments: Vec<String>,
+    },
+    Destroy {
+        target_class: String,
     },
     Return {
         value: String,

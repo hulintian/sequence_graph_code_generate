@@ -6,6 +6,7 @@ import type { Lifeline } from '../../types/diagram'
 const props = defineProps<{
   lifeline: Lifeline
   canvasHeight: number
+  destroyY?: number | null
 }>()
 
 const store = useDiagramStore()
@@ -20,7 +21,7 @@ const boxHeight = 40
 
 const x = computed(() => props.lifeline.position.x)
 const y = computed(() => props.lifeline.position.y)
-const lineEndY = computed(() => props.canvasHeight - 40)
+const lineEndY = computed(() => props.destroyY ?? props.canvasHeight - 40)
 
 // No stopPropagation — let event bubble to CanvasArea for drag handling
 </script>
@@ -65,6 +66,14 @@ const lineEndY = computed(() => props.canvasHeight - 40)
       font-size="13"
       font-weight="500"
     >{{ lifeline.name }}</text>
+
+    <!-- Destroy X symbol -->
+    <template v-if="destroyY">
+      <line :x1="x - 10" :y1="destroyY - 10" :x2="x + 10" :y2="destroyY + 10"
+            stroke="#e05555" stroke-width="2.5" />
+      <line :x1="x - 10" :y1="destroyY + 10" :x2="x + 10" :y2="destroyY - 10"
+            stroke="#e05555" stroke-width="2.5" />
+    </template>
   </g>
 </template>
 

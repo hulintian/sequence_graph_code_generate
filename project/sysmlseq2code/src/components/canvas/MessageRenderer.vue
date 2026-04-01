@@ -32,11 +32,14 @@ const isSelfCall = computed(() => props.message.sourceLifelineId === props.messa
 const arrowMarkerId = computed(() => {
   if (props.message.type === 'async') return 'arrow-open'
   if (props.message.type === 'return') return 'arrow-open'
+  if (props.message.type === 'create') return 'arrow-open'
+  // destroy uses filled arrow (same as sync)
   return 'arrow-filled'
 })
 
 const strokeDash = computed(() => {
   if (props.message.type === 'return') return '6,4'
+  if (props.message.type === 'create') return '6,4'
   return 'none'
 })
 
@@ -45,6 +48,12 @@ const label = computed(() => {
   const name = props.message.name
   if (props.message.type === 'return') {
     return props.message.returnType !== 'void' ? `return ${props.message.returnType}` : 'return'
+  }
+  if (props.message.type === 'create') {
+    return name ? `<<create>> ${name}` : '<<create>>'
+  }
+  if (props.message.type === 'destroy') {
+    return '<<destroy>>'
   }
   return args ? `${name}(${args})` : `${name}()`
 })
@@ -90,6 +99,14 @@ const label = computed(() => {
         font-size="12"
         text-anchor="middle"
       >{{ label }}</text>
+    </template>
+
+    <!-- Destroy X symbol at target -->
+    <template v-if="message.type === 'destroy' && !isSelfCall">
+      <line :x1="x2 - 10" :y1="y - 10" :x2="x2 + 10" :y2="y + 10"
+            stroke="#e05555" stroke-width="2.5" />
+      <line :x1="x2 - 10" :y1="y + 10" :x2="x2 + 10" :y2="y - 10"
+            stroke="#e05555" stroke-width="2.5" />
     </template>
 
     <!-- Invisible wider hit area -->

@@ -354,7 +354,7 @@ fn build_statements(
             continue;
         }
 
-        // Top-level message in current scope → Call statement
+        // Top-level message in current scope
         let source_name = lifeline_map
             .get(msg.source_lifeline_id.as_str())
             .map(|l| l.name.clone())
@@ -364,21 +364,35 @@ fn build_statements(
             .map(|l| l.name.clone())
             .unwrap_or_default();
 
-        let is_self_call = msg.source_lifeline_id == msg.target_lifeline_id;
-
-        stmts.push(Statement::Call {
-            source_class: source_name,
-            target_class: target_name,
-            method_name: msg.name.clone(),
-            arguments: msg.arguments.iter().map(|a| a.name.clone()).collect(),
-            return_type: if msg.return_type.is_empty() {
-                "void".to_string()
-            } else {
-                msg.return_type.clone()
-            },
-            message_type: msg.message_type.clone(),
-            is_self_call,
-        });
+        match msg.message_type.as_str() {
+            "create" => {
+                stmts.push(Statement::Create {
+                    target_class: target_name,
+                    arguments: msg.arguments.iter().map(|a| a.name.clone()).collect(),
+                });
+            }
+            "destroy" => {
+                stmts.push(Statement::Destroy {
+                    target_class: target_name,
+                });
+            }
+            _ => {
+                let is_self_call = msg.source_lifeline_id == msg.target_lifeline_id;
+                stmts.push(Statement::Call {
+                    source_class: source_name,
+                    target_class: target_name,
+                    method_name: msg.name.clone(),
+                    arguments: msg.arguments.iter().map(|a| a.name.clone()).collect(),
+                    return_type: if msg.return_type.is_empty() {
+                        "void".to_string()
+                    } else {
+                        msg.return_type.clone()
+                    },
+                    message_type: msg.message_type.clone(),
+                    is_self_call,
+                });
+            }
+        }
     }
 
     stmts
@@ -392,68 +406,39 @@ fn build_fragment_statement(
     msg_map: &HashMap<&str, &MessageInput>,
     lifeline_map: &HashMap<&str, &LifelineInput>,
 ) -> Statement {
+    // Helper: build statements for a single operand
+    let build_operand_stmts = |operand: &OperandInput| -> Vec<Statement> {
+        let operand_msgs: Vec<&MessageInput> = operand
+            .message_ids
+            .iter()
+            .filter_map(|id| msg_map.get(id.as_str()).copied())
+            .collect();
+        build_statements(
+            &operand_msgs,
+            fragment_map,
+            msg_map,
+            lifeline_map,
+            Some(&fragment.id),
+        )
+    };
+
     match fragment.fragment_type.as_str() {
         "alt" => {
-            let then_stmts = if !fragment.operands.is_empty() {
-                let operand_msgs: Vec<&MessageInput> = fragment.operands[0]
-                    .message_ids
-                    .iter()
-                    .filter_map(|id| msg_map.get(id.as_str()).copied())
-                    .collect();
-                build_statements(
-                    &operand_msgs,
-                    fragment_map,
-                    msg_map,
-                    lifeline_map,
-                    Some(&fragment.id),
-                )
-            } else {
-                vec![]
-            };
-
-            let else_stmts = if fragment.operands.len() > 1 {
-                let operand_msgs: Vec<&MessageInput> = fragment.operands[1]
-                    .message_ids
-                    .iter()
-                    .filter_map(|id| msg_map.get(id.as_str()).copied())
-                    .collect();
-                build_statements(
-                    &operand_msgs,
-                    fragment_map,
-                    msg_map,
-                    lifeline_map,
-                    Some(&fragment.id),
-                )
-            } else {
-                vec![]
-            };
-
-            let condition = fragment
+            // N-way if/else-if/else: one IfBranch per operand
+            let branches: Vec<IfBranch> = fragment
                 .operands
-                .first()
-                .map(|o| o.guard.clone())
-                .unwrap_or_default();
+                .iter()
+                .map(|op| IfBranch {
+                    condition: op.guard.clone(),
+                    stmts: build_operand_stmts(op),
+                })
+                .collect();
 
-            Statement::If {
-                condition,
-                then_stmts,
-                else_stmts,
-            }
+            Statement::If { branches }
         }
         "loop" => {
             let body_stmts = if !fragment.operands.is_empty() {
-                let operand_msgs: Vec<&MessageInput> = fragment.operands[0]
-                    .message_ids
-                    .iter()
-                    .filter_map(|id| msg_map.get(id.as_str()).copied())
-                    .collect();
-                build_statements(
-                    &operand_msgs,
-                    fragment_map,
-                    msg_map,
-                    lifeline_map,
-                    Some(&fragment.id),
-                )
+                build_operand_stmts(&fragment.operands[0])
             } else {
                 vec![]
             };
@@ -471,18 +456,7 @@ fn build_fragment_statement(
         }
         "opt" => {
             let body_stmts = if !fragment.operands.is_empty() {
-                let operand_msgs: Vec<&MessageInput> = fragment.operands[0]
-                    .message_ids
-                    .iter()
-                    .filter_map(|id| msg_map.get(id.as_str()).copied())
-                    .collect();
-                build_statements(
-                    &operand_msgs,
-                    fragment_map,
-                    msg_map,
-                    lifeline_map,
-                    Some(&fragment.id),
-                )
+                build_operand_stmts(&fragment.operands[0])
             } else {
                 vec![]
             };
@@ -498,21 +472,46 @@ fn build_fragment_statement(
                 body_stmts,
             }
         }
-        // par, break — treat as opt for now
+        "break" => {
+            let body_stmts = if !fragment.operands.is_empty() {
+                build_operand_stmts(&fragment.operands[0])
+            } else {
+                vec![]
+            };
+
+            let condition = fragment
+                .operands
+                .first()
+                .map(|o| o.guard.clone())
+                .unwrap_or_default();
+
+            Statement::Break {
+                condition,
+                body_stmts,
+            }
+        }
+        "par" => {
+            // Each operand becomes a parallel branch
+            let branches: Vec<ParBranch> = fragment
+                .operands
+                .iter()
+                .enumerate()
+                .map(|(i, op)| ParBranch {
+                    label: if op.guard.is_empty() {
+                        format!("branch_{}", i)
+                    } else {
+                        op.guard.clone()
+                    },
+                    stmts: build_operand_stmts(op),
+                })
+                .collect();
+
+            Statement::Par { branches }
+        }
+        // Unknown fragment types: fall back to opt
         _ => {
             let body_stmts = if !fragment.operands.is_empty() {
-                let operand_msgs: Vec<&MessageInput> = fragment.operands[0]
-                    .message_ids
-                    .iter()
-                    .filter_map(|id| msg_map.get(id.as_str()).copied())
-                    .collect();
-                build_statements(
-                    &operand_msgs,
-                    fragment_map,
-                    msg_map,
-                    lifeline_map,
-                    Some(&fragment.id),
-                )
+                build_operand_stmts(&fragment.operands[0])
             } else {
                 vec![]
             };
@@ -550,16 +549,25 @@ fn collect_stmt_deps(stmts: &[Statement], self_name: &str, deps: &mut Vec<String
                     deps.push(target_class.clone());
                 }
             }
-            Statement::If {
-                then_stmts,
-                else_stmts,
-                ..
-            } => {
-                collect_stmt_deps(then_stmts, self_name, deps);
-                collect_stmt_deps(else_stmts, self_name, deps);
+            Statement::If { branches } => {
+                for branch in branches {
+                    collect_stmt_deps(&branch.stmts, self_name, deps);
+                }
             }
-            Statement::Loop { body_stmts, .. } | Statement::Opt { body_stmts, .. } => {
+            Statement::Loop { body_stmts, .. }
+            | Statement::Opt { body_stmts, .. }
+            | Statement::Break { body_stmts, .. } => {
                 collect_stmt_deps(body_stmts, self_name, deps);
+            }
+            Statement::Par { branches } => {
+                for branch in branches {
+                    collect_stmt_deps(&branch.stmts, self_name, deps);
+                }
+            }
+            Statement::Create { target_class, .. } | Statement::Destroy { target_class } => {
+                if target_class != self_name && !deps.contains(target_class) {
+                    deps.push(target_class.clone());
+                }
             }
             Statement::Return { .. } => {}
         }
@@ -638,23 +646,38 @@ fn collect_stmt_types(stmts: &[Statement], types: &mut HashSet<String>) {
         match stmt {
             Statement::Call {
                 return_type,
-                arguments: _,
+                message_type,
                 ..
             } => {
                 if return_type != "void" {
                     types.insert(return_type.clone());
                 }
+                // Async calls need <future>
+                if message_type == "async" {
+                    types.insert("future".to_string());
+                }
             }
-            Statement::If {
-                then_stmts,
-                else_stmts,
-                ..
-            } => {
-                collect_stmt_types(then_stmts, types);
-                collect_stmt_types(else_stmts, types);
+            Statement::If { branches } => {
+                for branch in branches {
+                    collect_stmt_types(&branch.stmts, types);
+                }
             }
-            Statement::Loop { body_stmts, .. } | Statement::Opt { body_stmts, .. } => {
+            Statement::Loop { body_stmts, .. }
+            | Statement::Opt { body_stmts, .. }
+            | Statement::Break { body_stmts, .. } => {
                 collect_stmt_types(body_stmts, types);
+            }
+            Statement::Par { branches } => {
+                // Par needs <thread> and <future>
+                types.insert("thread".to_string());
+                types.insert("future".to_string());
+                for branch in branches {
+                    collect_stmt_types(&branch.stmts, types);
+                }
+            }
+            Statement::Create { .. } | Statement::Destroy { .. } => {
+                // Create/destroy may need <memory> for unique_ptr
+                types.insert("unique_ptr".to_string());
             }
             Statement::Return { return_type, .. } => {
                 if return_type != "void" {

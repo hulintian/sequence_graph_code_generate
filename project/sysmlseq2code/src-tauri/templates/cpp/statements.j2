@@ -1,7 +1,21 @@
 {%- macro render_stmt(stmt, indent) -%}
 {%- if stmt.kind == "Call" -%}
+{%- if stmt.message_type == "async" -%}
 {%- if stmt.is_self_call -%}
+{{ indent }}auto future_{{ stmt.method_name }} = std::async(std::launch::async, [this]() {
+{{ indent }}    {{ stmt.method_name }}({{ stmt.arguments | join(", ") }});
+{{ indent }}});
+{%- else -%}
+{{ indent }}auto future_{{ stmt.method_name }} = std::async(std::launch::async, [this]() {
+{{ indent }}    {{ stmt.target_class | lower }}_.{{ stmt.method_name }}({{ stmt.arguments | join(", ") }});
+{{ indent }}});
+{%- endif -%}
+{%- elif stmt.is_self_call -%}
+{%- if stmt.return_type != "void" -%}
+{{ indent }}{{ stmt.return_type }} result = {{ stmt.method_name }}({{ stmt.arguments | join(", ") }});
+{%- else -%}
 {{ indent }}{{ stmt.method_name }}({{ stmt.arguments | join(", ") }});
+{%- endif -%}
 {%- else -%}
 {%- if stmt.return_type != "void" -%}
 {{ indent }}{{ stmt.return_type }} result = {{ stmt.target_class | lower }}_.{{ stmt.method_name }}({{ stmt.arguments | join(", ") }});
@@ -10,18 +24,19 @@
 {%- endif -%}
 {%- endif -%}
 {%- elif stmt.kind == "If" -%}
-{{ indent }}if ({{ stmt.condition }}) {
-{%- for s in stmt.then_stmts %}
-{{ render_stmt(s, indent ~ "    ") }}
-{%- endfor %}
-{{ indent }}}
-{%- if stmt.else_stmts -%}
-{{ " " }}else {
-{%- for s in stmt.else_stmts %}
-{{ render_stmt(s, indent ~ "    ") }}
-{%- endfor %}
-{{ indent }}}
+{%- for branch in stmt.branches -%}
+{%- if loop.first -%}
+{{ indent }}if ({{ branch.condition }}) {
+{%- elif branch.condition and branch.condition != "else" -%}
+ else if ({{ branch.condition }}) {
+{%- else -%}
+ else {
 {%- endif -%}
+{%- for s in branch.stmts %}
+{{ render_stmt(s, indent ~ "    ") }}
+{%- endfor %}
+{{ indent }}}
+{%- endfor -%}
 {%- elif stmt.kind == "Loop" -%}
 {{ indent }}while ({{ stmt.condition }}) {
 {%- for s in stmt.body_stmts %}
@@ -34,6 +49,29 @@
 {{ render_stmt(s, indent ~ "    ") }}
 {%- endfor %}
 {{ indent }}}
+{%- elif stmt.kind == "Break" -%}
+{{ indent }}if ({{ stmt.condition }}) {
+{%- for s in stmt.body_stmts %}
+{{ render_stmt(s, indent ~ "    ") }}
+{%- endfor %}
+{{ indent }}    return;
+{{ indent }}}
+{%- elif stmt.kind == "Par" -%}
+{{ indent }}// Parallel execution
+{%- for branch in stmt.branches %}
+{{ indent }}auto future_{{ loop.index0 }} = std::async(std::launch::async, [this]() {
+{%- for s in branch.stmts %}
+{{ render_stmt(s, indent ~ "    ") }}
+{%- endfor %}
+{{ indent }}});
+{%- endfor %}
+{%- for branch in stmt.branches %}
+{{ indent }}future_{{ loop.index0 }}.get();
+{%- endfor %}
+{%- elif stmt.kind == "Create" -%}
+{{ indent }}auto {{ stmt.target_class | lower }}_ = std::make_unique<{{ stmt.target_class }}>({{ stmt.arguments | join(", ") }});
+{%- elif stmt.kind == "Destroy" -%}
+{{ indent }}{{ stmt.target_class | lower }}_.reset(); // destroy {{ stmt.target_class }}
 {%- elif stmt.kind == "Return" -%}
 {{ indent }}return {{ stmt.value }};
 {%- endif -%}

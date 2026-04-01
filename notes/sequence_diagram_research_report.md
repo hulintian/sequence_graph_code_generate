@@ -1637,6 +1637,21 @@ sequenceDiagram
     deactivate Server
 ```
 
+**伪代码**:
+```cpp
+// Client 端
+void Client::doWork() {
+    Response res = server.request(params);  // synchCall: 同步阻塞等待
+    processResponse(res);
+}
+
+// Server 端
+Response Server::request(Params params) {
+    Result result = process(params);
+    return Response(result);  // reply: 返回响应
+}
+```
+
 ### 6.2 观察者/回调模式 (Observer/Callback)
 
 **描述**: Subject 维护 Observer 列表, 状态变化时通知所有 Observer。
@@ -1684,6 +1699,38 @@ sequenceDiagram
     end
 ```
 
+**伪代码**:
+```cpp
+class Subject {
+    vector<Observer*> observers;
+    State state;
+
+    void attach(Observer* obs) {
+        observers.push_back(obs);
+    }
+
+    void setState(State newState) {
+        state = newState;
+        notify();  // self-message
+    }
+
+    void notify() {
+        for (auto* obs : observers) {          // loop [for each observer]
+            obs->update(this);                 // asynch/synchCall
+        }
+    }
+
+    State getState() { return state; }
+};
+
+class Observer {
+    void update(Subject* subject) {
+        State s = subject->getState();         // synchCall + reply
+        react(s);
+    }
+};
+```
+
 ### 6.3 工厂/创建模式 (Factory/Creation)
 
 **描述**: 工厂对象创建新的对象实例。
@@ -1713,6 +1760,23 @@ sequenceDiagram
     Factory->>Product: <<create>>
     Product-->>Factory: initDone
     Factory-->>Client: product
+```
+
+**伪代码**:
+```cpp
+class Factory {
+    Product* create(string type) {
+        Product* product = new Product(type);  // createMessage: <<create>>
+        product->init();                       // synchCall: 初始化
+        return product;                        // reply: 返回产品实例
+    }
+};
+
+// Client 端
+void Client::run() {
+    Product* p = factory.create("TypeA");      // synchCall
+    p->use();
+}
 ```
 
 ### 6.4 责任链模式 (Chain of Responsibility)
@@ -1758,6 +1822,27 @@ sequenceDiagram
     end
 ```
 
+**伪代码**:
+```cpp
+class Handler {
+    Handler* successor;
+
+    Result handle(Request req) {
+        if (canHandle(req)) {                  // alt [canHandle]
+            return doHandle(req);              // 本节点处理并返回
+        } else if (successor != nullptr) {     // alt [cannot handle]
+            return successor->handle(req);     // synchCall: 传递给下一个
+        }
+        return Result::unhandled();
+    }
+};
+
+// Client 端
+void Client::run() {
+    Result res = handler1.handle(request);     // synchCall: 进入责任链
+}
+```
+
 ### 6.5 错误处理模式 (Error Handling)
 
 **描述**: 使用 break CombinedFragment 表示异常流。
@@ -1797,6 +1882,18 @@ sequenceDiagram
         Server-->>Client: errorResp()
     end
     Server-->>Client: success()
+```
+
+**伪代码**:
+```cpp
+Response Server::request(Params params) {
+    if (errorOccurred(params)) {               // break [error occurred]
+        return Response::error("failed");      // 提前终止, 跳过后续正常流程
+    }
+    // --- 正常流程(break 未触发时执行) ---
+    Result result = process(params);
+    return Response::success(result);
+}
 ```
 
 ### 6.6 异步消息模式 (Async Messaging)
@@ -1874,13 +1971,392 @@ sequenceDiagram
 
 **消息类型**: asynchCall 或 asynchSignal (实线+开放箭头)
 
+**伪代码**:
+```cpp
+// Fire-and-Forget
+void Sender::run() {
+    receiver.signal(data);                     // asynchSignal: 发送后立即返回
+    doOtherWork();                             // 不等待 receiver 处理完成
+}
+
+// Async with Callback
+void Client::run() {
+    service.request(data, [this](Result r) {   // asynchCall + 注册回调
+        this->onCallback(r);
+    });
+    doOtherWork();                             // 立即继续
+}
+
+void Service::request(Data data, Callback cb) {
+    async_execute([=]() {
+        Result r = process(data);              // self-message: 内部处理
+        cb(r);                                 // asynchSignal: 回调通知
+    });
+}
+
+// Publish-Subscribe
+void Publisher::publish(Event event) {
+    broker.publish(event);                     // asynchSignal
+}
+
+void Broker::publish(Event event) {
+    for (auto* sub : subscribers) {            // par: 并行通知
+        async_send(sub, event);                // asynchSignal: notify
+    }
+}
+```
+
+### 6.7 中介者/控制器模式 (Mediator / Controller)
+
+**描述**: 一个中央控制器生命线协调多个子系统之间的交互, 其他生命线不直接通信。序列图呈现"星型"拓扑。
+
+**结构**:
+```
+SubA        Controller      SubB        SubC
+  |              |            |           |
+  |              |-- cmdA() ->|           |
+  |              |<-- ack ----|           |
+  |              |-- cmdB() ------------>|
+  |              |<-- ack --------------|
+  |<-- notify --|             |           |
+```
+
+**特点**:
+- 所有消息都经过中央控制器, 子系统之间无直接通信
+- 降低子系统间耦合, 便于独立替换子系统
+- 控制器生命线上的执行规约较长, 体现协调职责
+
+**Mermaid 示例**:
+```mermaid
+sequenceDiagram
+    participant SubA
+    participant Controller
+    participant SubB
+    participant SubC
+
+    Controller->>SubB: cmdA()
+    activate SubB
+    SubB-->>Controller: ack
+    deactivate SubB
+    Controller->>SubC: cmdB()
+    activate SubC
+    SubC-->>Controller: ack
+    deactivate SubC
+    Controller->>SubA: notify(result)
+```
+
+**伪代码**:
+```cpp
+class Controller {
+    SubA* subA;
+    SubB* subB;
+    SubC* subC;
+
+    void orchestrate() {
+        auto ack1 = subB->cmdA(params);        // synchCall: 协调子系统B
+        auto ack2 = subC->cmdB(params);        // synchCall: 协调子系统C
+        subA->notify(aggregate(ack1, ack2));   // synchCall: 通知子系统A
+    }
+};
+
+// 子系统之间不直接通信, 所有交互通过 Controller 中转
+```
+
+### 6.8 并发/分叉-汇合模式 (Fork-Join / Parallel)
+
+**描述**: 使用 `par` 片段, 一个控制器同时向多个子系统发出并行请求, 然后等待所有响应汇聚后继续。
+
+**结构**:
+```
+Controller      SubA         SubB         SubC
+  |              |            |            |
+  |┌─par────────────────────────────────┐ |
+  |│ |-- reqA() ->|           |         │ |
+  |│ |<-- resA ---|           |         │ |
+  |├─and────────────────────────────────┤ |
+  |│ |-- reqB() ------------>|          │ |
+  |│ |<-- resB --------------|          │ |
+  |├─and────────────────────────────────┤ |
+  |│ |-- reqC() ---------------------->│ |
+  |│ |<-- resC -----------------------|│ |
+  |└────────────────────────────────────┘ |
+  |              |            |            |
+  |-- aggregate() (self)                   |
+```
+
+**特点**:
+- `par` 片段内的各操作数并行执行
+- 所有并行分支完成后, 控制流汇合到 `par` 片段之后继续
+- 适用于并行数据采集、多服务聚合等场景
+
+**Mermaid 示例**:
+```mermaid
+sequenceDiagram
+    participant Controller
+    participant SubA
+    participant SubB
+    participant SubC
+
+    par request A
+        Controller->>SubA: reqA()
+        SubA-->>Controller: resA
+    and request B
+        Controller->>SubB: reqB()
+        SubB-->>Controller: resB
+    and request C
+        Controller->>SubC: reqC()
+        SubC-->>Controller: resC
+    end
+    Controller->>Controller: aggregate()
+```
+
+**伪代码**:
+```cpp
+void Controller::fetchAll() {
+    // par: 并行发起请求
+    future<ResA> fA = async([&]() {
+        return subA->reqA();                   // par operand 1
+    });
+    future<ResB> fB = async([&]() {
+        return subB->reqB();                   // par operand 2
+    });
+    future<ResC> fC = async([&]() {
+        return subC->reqC();                   // par operand 3
+    });
+
+    // 汇合: 等待所有并行分支完成
+    ResA a = fA.get();
+    ResB b = fB.get();
+    ResC c = fC.get();
+
+    aggregate(a, b, c);                        // self-message: 聚合结果
+}
+```
+
+### 6.9 分层引用模式 (Hierarchical Decomposition)
+
+**描述**: 使用 `ref` 片段将复杂交互拆分为多个子序列图。主图只展示高层流程, 细节封装在被引用的交互中。这是管理复杂度的核心手段。
+
+**结构**:
+```
+Client        Server        Database
+  |              |              |
+  |-- login() ->|              |
+  |              |              |
+  |┌─ref─────────────────────┐ |
+  |│ AuthenticateUser        │ |
+  |└─────────────────────────┘ |
+  |              |              |
+  |┌─ref─────────────────────┐ |
+  |│ LoadUserProfile         │ |
+  |└─────────────────────────┘ |
+  |              |              |
+  |<-- session -|              |
+```
+
+**特点**:
+- 每个 `ref` 片段引用另一个完整的 Interaction(子序列图)
+- 支持逐步精化(stepwise refinement): 顶层展示概要流程, 各 ref 展开后呈现详细步骤
+- 通过 Gate 进行实际参数与形式参数的绑定
+- 提高可维护性, 避免单张序列图过于庞大
+
+**Mermaid 示例**:
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Server
+    participant Database
+
+    Client->>Server: login(user, pass)
+    rect rgb(200, 220, 240)
+        Note over Server, Database: ref AuthenticateUser
+        Server->>Database: query(user, pass)
+        Database-->>Server: authResult
+    end
+    rect rgb(200, 220, 240)
+        Note over Server, Database: ref LoadUserProfile
+        Server->>Database: getProfile(userId)
+        Database-->>Server: profile
+    end
+    Server-->>Client: session
+```
+
+**伪代码**:
+```cpp
+// 主流程: 对应顶层序列图
+Session Server::login(string user, string pass) {
+    AuthResult auth = authenticateUser(user, pass);  // ref AuthenticateUser
+    Profile profile = loadUserProfile(auth.userId);  // ref LoadUserProfile
+    return Session(auth, profile);
+}
+
+// 子序列图 ref AuthenticateUser: 展开细节
+AuthResult Server::authenticateUser(string user, string pass) {
+    auto row = database.query(user, pass);           // synchCall
+    return AuthResult(row);
+}
+
+// 子序列图 ref LoadUserProfile: 展开细节
+Profile Server::loadUserProfile(int userId) {
+    auto data = database.getProfile(userId);         // synchCall
+    return Profile(data);
+}
+```
+
+### 6.10 状态驱动交互模式 (State-Driven Interaction)
+
+**描述**: 结合状态不变量(StateInvariant), 消息的发送或接收以参与者当前状态为前提条件, 将序列图与状态机图关联起来。
+
+**结构**:
+```
+Client          Device
+  |                |
+  |        {Idle}  |   ← 状态不变量
+  |-- start() --->|
+  |       {Running}|
+  |-- getData() ->|
+  |<-- data ------|
+  |-- stop() ---->|
+  |         {Idle} |
+```
+
+**特点**:
+- StateInvariant 标注在生命线上, 约束某一时刻参与者必须处于的状态
+- 消息的守卫条件(guard)可以引用生命线的当前状态
+- 建立序列图与状态机图之间的一致性约束
+- 适用于嵌入式系统、协议建模等状态敏感的场景
+
+**Mermaid 示例**:
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Device
+
+    Note right of Device: {Idle}
+    Client->>Device: start()
+    Note right of Device: {Running}
+    Client->>Device: getData()
+    Device-->>Client: data
+    Client->>Device: stop()
+    Note right of Device: {Idle}
+```
+
+**伪代码**:
+```cpp
+enum class DeviceState { Idle, Running };
+
+class Device {
+    DeviceState state = DeviceState::Idle;
+
+    void start() {
+        assert(state == DeviceState::Idle);    // StateInvariant: {Idle}
+        state = DeviceState::Running;          // 状态迁移
+    }
+
+    Data getData() {
+        assert(state == DeviceState::Running); // StateInvariant: {Running}
+        return acquireData();
+    }
+
+    void stop() {
+        assert(state == DeviceState::Running); // StateInvariant: {Running}
+        state = DeviceState::Idle;             // 状态迁移回 Idle
+    }
+};
+
+// Client 端
+void Client::run() {
+    // Device 此时必须处于 {Idle} 状态
+    device.start();
+    // Device 现在处于 {Running} 状态
+    Data d = device.getData();
+    device.stop();
+    // Device 回到 {Idle} 状态
+}
+```
+
 ---
 
-## 第七部分：元素关系总图
+## 第七部分：设计范式 (Design Paradigms)
+
+从更高的方法论层面, 序列图的使用遵循以下范式:
 
 ---
 
-### 7.1 继承/泛化关系
+### 7.1 场景驱动建模 (Scenario-Based Modeling)
+
+每个序列图对应系统的一个具体使用场景或用例实现。这是最主流的范式——先定义用例, 再用序列图逐一细化每个场景的交互过程。
+
+**核心思路**:
+- 一个用例(Use Case)对应一个或多个序列图
+- 主成功场景(Main Success Scenario)用一张序列图表示
+- 替代流和异常流用 `alt`/`break` 片段表示, 或拆分为独立序列图
+
+**适用阶段**: 需求分析、功能验证
+
+### 7.2 黑盒 vs 白盒建模 (Black-box vs White-box)
+
+**黑盒序列图**: 系统作为一个整体生命线, 与外部 Actor 交互, 用于需求层面。
+**白盒序列图**: 打开系统内部, 展示内部 Block/Part 之间的协作, 用于设计层面。
+
+这对应 SysML 的多层次建模理念:
+- 黑盒图关注"系统做什么"(What)
+- 白盒图关注"系统怎么做"(How)
+- 两者通过相同的外部消息接口保持一致性
+
+### 7.3 契约式设计 (Design by Contract)
+
+通过前置/后置状态不变量(StateInvariant)和消息的前置条件(guard), 将序列图当作交互契约来约束参与者的行为。
+
+**要素**:
+- **前置条件**: 消息发送前, 接收方必须处于特定状态(StateInvariant)
+- **后置条件**: 消息处理后, 参与者状态发生预期变化
+- **守卫条件**: CombinedFragment 的 guard 表达式约束执行路径
+
+### 7.4 逐步精化 (Stepwise Refinement)
+
+从抽象的高层交互逐步细化到具体实现:
+- 第一层可能只有两三条消息, 展示系统级交互概要
+- 通过 `ref` 引用逐层展开, 每层增加更多细节
+- 每次精化保持与上层的语义一致性(相同的外部可观测行为)
+
+**典型层次**:
+1. **上下文层**: Actor ↔ System(黑盒)
+2. **子系统层**: 主要子系统之间的协作
+3. **组件层**: 具体组件/模块之间的消息传递
+4. **实现层**: 类/对象级别的方法调用
+
+### 7.5 面向接口建模 (Interface-Oriented Modeling)
+
+生命线代表的不是具体实现, 而是端口(Port)和接口(Interface)。消息对应接口上定义的操作, 使交互描述与具体实现解耦。
+
+**在 SysML 中的重要性**:
+- SysML 强调通过 FlowPort / ProxyPort 定义系统边界
+- 生命线可以代表 Port, 消息经由 Port 上的 Interface 定义
+- 实现替换时, 只要接口不变, 序列图无需修改
+
+### 7.6 基于模型的系统工程 (MBSE) 框架整合
+
+在 MBSE 方法（如 MagicGrid、OOSEM、Harmony SE）中, 序列图处于特定的建模阶段:
+
+**典型定位**:
+- **功能分析阶段**: 用序列图描述系统功能的实现流程
+- **逻辑架构设计阶段**: 用序列图验证架构分配(Architecture Allocation)——即确认所定义的 Block 结构能否正确实现所要求的行为
+- **验证阶段**: 序列图作为测试用例的来源, 生成预期的交互序列
+
+**与其他图的协同**:
+- 用例图 → 序列图(场景细化)
+- 序列图 → 状态机图(生命线行为提取)
+- 序列图 → 活动图(控制流提取)
+- 块定义图(BDD) ↔ 序列图(结构与行为一致性)
+
+---
+
+## 第八部分：元素关系总图
+
+---
+
+### 8.1 继承/泛化关系
 
 ```
 Element
@@ -1908,7 +2384,7 @@ InteractionFragment (abstract)
 └── Continuation
 ```
 
-### 7.2 关联/引用关系
+### 8.2 关联/引用关系
 
 ```
 Interaction ──owns──> Lifeline [*]
@@ -1945,7 +2421,7 @@ GeneralOrdering ──after──> OccurrenceSpecification
 
 ---
 
-## 第八部分：InteractionOperatorKind 完整枚举
+## 第九部分：InteractionOperatorKind 完整枚举
 
 | 枚举值 | 中文名称 | 操作数数量 | 主要用途 |
 |--------|----------|-----------|----------|
@@ -1964,7 +2440,7 @@ GeneralOrdering ──after──> OccurrenceSpecification
 
 ---
 
-## 参考资料来源 (Sources)
+## 第十部分：参考资料来源 (Sources)
 
 - [UML Sequence Diagrams Overview - uml-diagrams.org](https://www.uml-diagrams.org/sequence-diagrams.html)
 - [UML Interaction Message - uml-diagrams.org](https://www.uml-diagrams.org/interaction-message.html)

@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { useDiagramStore } from '../stores/diagram'
 import { invoke } from '@tauri-apps/api/core'
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
+import { open, save, ask, message } from '@tauri-apps/plugin-dialog'
+
+const DIALOG_FILTERS = [
+  { name: '顺序图文件', extensions: ['seqd.json'] },
+  { name: '所有文件', extensions: ['*'] },
+]
 
 const store = useDiagramStore()
 const showFileMenu = ref(false)
@@ -22,34 +28,121 @@ function toggleMenu(menu: 'file' | 'edit' | 'view') {
   else if (menu === 'view') showViewMenu.value = !was.view
 }
 
+/** Prompt user to save unsaved changes. Returns true if safe to proceed. */
+async function confirmDiscardIfDirty(): Promise<boolean> {
+  if (!store.isDirty) return true
+  return await ask('当前图表有未保存的更改，是否放弃？', {
+    title: '未保存的更改',
+    kind: 'warning',
+    okLabel: '放弃',
+    cancelLabel: '取消',
+  })
+}
+
 async function handleNew() {
   closeMenus()
+  if (!(await confirmDiscardIfDirty())) return
   store.newDiagram()
 }
 
 async function handleSave() {
   closeMenus()
   try {
-    const data = JSON.stringify(store.toJSON(), null, 2)
-    const path = store.currentFilePath ?? 'diagram.seqd.json'
-    await invoke('save_diagram', { path, content: data })
-    store.isDirty = false
-    store.currentFilePath = path
-  } catch (e) {
-    console.error('Save failed:', e)
+    if (store.currentFilePath) {
+      // Already has a path, save directly
+      const data = JSON.stringify(store.toJSON(), null, 2)
+      await invoke('save_diagram', { path: store.currentFilePath, content: data })
+      store.isDirty = false
+    } else {
+      // No path yet, behave like Save As
+      await doSaveAs()
+    }
+  } catch (e: any) {
+    await message(`保存失败: ${e}`, { title: '错误', kind: 'error' })
+  }
+}
+
+async function doSaveAs() {
+  const selected = await save({
+    title: '另存为',
+    defaultPath: store.currentFilePath ?? `${store.metadata.name || 'diagram'}.seqd.json`,
+    filters: DIALOG_FILTERS,
+  })
+  if (!selected) return // user cancelled
+
+  let filePath = selected
+  // Ensure .seqd.json extension
+  if (!filePath.endsWith('.seqd.json')) {
+    if (filePath.endsWith('.json')) {
+      filePath = filePath.replace(/\.json$/, '.seqd.json')
+    } else {
+      filePath += '.seqd.json'
+    }
+  }
+
+  const data = JSON.stringify(store.toJSON(), null, 2)
+  await invoke('save_diagram', { path: filePath, content: data })
+  store.isDirty = false
+  store.currentFilePath = filePath
+}
+
+async function handleSaveAs() {
+  closeMenus()
+  try {
+    await doSaveAs()
+  } catch (e: any) {
+    await message(`保存失败: ${e}`, { title: '错误', kind: 'error' })
   }
 }
 
 async function handleLoad() {
   closeMenus()
+  if (!(await confirmDiscardIfDirty())) return
   try {
-    const content = await invoke<string>('load_diagram', { path: '' })
+    const selected = await open({
+      title: '打开顺序图文件',
+      multiple: false,
+      directory: false,
+      filters: DIALOG_FILTERS,
+    })
+    if (!selected) return // user cancelled
+
+    const filePath = typeof selected === 'string' ? selected : selected
+    const content = await invoke<string>('load_diagram', { path: filePath })
     const data = JSON.parse(content)
     store.loadFromJSON(data)
-  } catch (e) {
-    console.error('Load failed:', e)
+    store.currentFilePath = filePath
+    store.isDirty = false
+  } catch (e: any) {
+    await message(`打开失败: ${e}`, { title: '错误', kind: 'error' })
   }
 }
+
+// Global keyboard shortcuts for file operations
+function handleGlobalKeyDown(e: KeyboardEvent) {
+  if (!(e.ctrlKey || e.metaKey)) return
+  if (e.key === 'n') {
+    e.preventDefault()
+    handleNew()
+  } else if (e.key === 'o') {
+    e.preventDefault()
+    handleLoad()
+  } else if (e.key === 's' && e.shiftKey) {
+    e.preventDefault()
+    handleSaveAs()
+  } else if (e.key === 's') {
+    e.preventDefault()
+    handleSave()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleGlobalKeyDown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleGlobalKeyDown)
+})
 
 function handleUndo() {
   closeMenus()
@@ -86,6 +179,7 @@ function resetZoom() {
         <button @click="handleNew">新建 <span class="shortcut">Ctrl+N</span></button>
         <button @click="handleLoad">打开... <span class="shortcut">Ctrl+O</span></button>
         <button @click="handleSave">保存 <span class="shortcut">Ctrl+S</span></button>
+        <button @click="handleSaveAs">另存为... <span class="shortcut">Ctrl+Shift+S</span></button>
         <div class="separator"></div>
         <button disabled>导出 XMI... <span class="shortcut">Ctrl+E</span></button>
         <button disabled>导入 XMI...</button>

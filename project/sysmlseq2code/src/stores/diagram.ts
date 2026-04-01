@@ -136,7 +136,7 @@ export const useDiagramStore = defineStore('diagram', () => {
   function addMessage(
     sourceId: string,
     targetId: string,
-    type: 'sync' | 'async' | 'return' = 'sync',
+    type: 'sync' | 'async' | 'return' | 'create' | 'destroy' = 'sync',
     name?: string
   ) {
     pushUndo()
@@ -153,25 +153,40 @@ export const useDiagramStore = defineStore('diagram', () => {
       arguments: [],
       returnType: 'void',
       guard: '',
-      parentFragmentId: null
+      parentFragmentId: null,
+      linkedReturnId: null
     })
     selectElement(id, 'message')
   }
 
   function addCombinedFragment(
-    type: 'alt' | 'loop' | 'opt' | 'par',
+    type: 'alt' | 'loop' | 'opt' | 'par' | 'break',
     messageIds: string[],
     rect?: { x: number; y: number; width: number; height: number }
   ) {
     pushUndo()
     const id = generateId('cf')
-    const defaultGuard = type === 'loop' ? 'i < n' : type === 'alt' ? 'condition' : 'condition'
-    const operands = type === 'alt'
-      ? [
-          { id: generateId('op'), guard: defaultGuard, messageIds },
-          { id: generateId('op'), guard: 'else', messageIds: [] }
-        ]
-      : [{ id: generateId('op'), guard: defaultGuard, messageIds }]
+    const defaultGuard = type === 'loop' ? 'i < n' : type === 'break' ? 'errorOccurred' : 'condition'
+
+    let operands: { id: string; guard: string; messageIds: string[] }[]
+    let dividerRatios: number[]
+
+    if (type === 'alt') {
+      operands = [
+        { id: generateId('op'), guard: defaultGuard, messageIds },
+        { id: generateId('op'), guard: 'else', messageIds: [] }
+      ]
+      dividerRatios = [0.5]
+    } else if (type === 'par') {
+      operands = [
+        { id: generateId('op'), guard: 'branch 1', messageIds },
+        { id: generateId('op'), guard: 'branch 2', messageIds: [] }
+      ]
+      dividerRatios = [0.5]
+    } else {
+      operands = [{ id: generateId('op'), guard: defaultGuard, messageIds }]
+      dividerRatios = []
+    }
 
     combinedFragments.value.push({
       id,
@@ -182,9 +197,38 @@ export const useDiagramStore = defineStore('diagram', () => {
       y: rect?.y ?? 120,
       width: rect?.width ?? 240,
       height: rect?.height ?? 120,
-      dividerRatio: 0.5
+      dividerRatios
     })
     selectElement(id, 'fragment')
+  }
+
+  function addOperand(fragmentId: string) {
+    const frag = combinedFragments.value.find(f => f.id === fragmentId)
+    if (!frag) return
+    if (frag.type !== 'alt' && frag.type !== 'par') return
+    pushUndo()
+    const n = frag.operands.length
+    const guard = frag.type === 'alt' ? 'else' : `branch ${n + 1}`
+    frag.operands.push({ id: generateId('op'), guard, messageIds: [] })
+    // Add a new divider ratio evenly spaced
+    const newRatios: number[] = []
+    for (let i = 1; i < frag.operands.length; i++) {
+      newRatios.push(i / frag.operands.length)
+    }
+    frag.dividerRatios = newRatios
+  }
+
+  function removeOperand(fragmentId: string, operandIndex: number) {
+    const frag = combinedFragments.value.find(f => f.id === fragmentId)
+    if (!frag || frag.operands.length <= 1 || operandIndex < 0 || operandIndex >= frag.operands.length) return
+    pushUndo()
+    frag.operands.splice(operandIndex, 1)
+    // Recalculate divider ratios evenly
+    const newRatios: number[] = []
+    for (let i = 1; i < frag.operands.length; i++) {
+      newRatios.push(i / frag.operands.length)
+    }
+    frag.dividerRatios = newRatios
   }
 
   function updateLifeline(id: string, updates: Partial<Lifeline>) {
@@ -199,7 +243,63 @@ export const useDiagramStore = defineStore('diagram', () => {
     pushUndo()
     const idx = messages.value.findIndex(m => m.id === id)
     if (idx !== -1) {
-      messages.value[idx] = { ...messages.value[idx], ...updates }
+      const oldMsg = messages.value[idx]
+      messages.value[idx] = { ...oldMsg, ...updates }
+      const msg = messages.value[idx]
+
+      // Auto-return logic: sync message with non-void returnType
+      if (msg.type === 'sync') {
+        const newReturnType = updates.returnType ?? msg.returnType
+        const hadReturn = oldMsg.linkedReturnId !== null
+        const needsReturn = newReturnType !== 'void' && newReturnType !== ''
+
+        if (needsReturn && !hadReturn) {
+          // Create auto-return message
+          const retId = generateId('msg')
+          const retOrder = messages.value.length + 1
+          const retY = msg.customY ? msg.customY + 30 : null
+          messages.value.push({
+            id: retId,
+            name: newReturnType,
+            type: 'return',
+            sourceLifelineId: msg.targetLifelineId,
+            targetLifelineId: msg.sourceLifelineId,
+            orderIndex: retOrder,
+            customY: retY,
+            arguments: [],
+            returnType: 'void',
+            guard: '',
+            parentFragmentId: msg.parentFragmentId,
+            linkedReturnId: null
+          })
+          msg.linkedReturnId = retId
+          // Assign to same operand as the sync message
+          for (const frag of combinedFragments.value) {
+            for (const op of frag.operands) {
+              if (op.messageIds.includes(msg.id) && !op.messageIds.includes(retId)) {
+                op.messageIds.push(retId)
+              }
+            }
+          }
+        } else if (!needsReturn && hadReturn) {
+          // Remove auto-return message
+          const retId = oldMsg.linkedReturnId!
+          messages.value = messages.value.filter(m => m.id !== retId)
+          // Remove from fragment operands
+          for (const frag of combinedFragments.value) {
+            for (const op of frag.operands) {
+              op.messageIds = op.messageIds.filter(mid => mid !== retId)
+            }
+          }
+          msg.linkedReturnId = null
+        } else if (needsReturn && hadReturn) {
+          // Update return message name to match new returnType
+          const retMsg = messages.value.find(m => m.id === msg.linkedReturnId)
+          if (retMsg) {
+            retMsg.name = newReturnType
+          }
+        }
+      }
     }
   }
 
@@ -233,7 +333,10 @@ export const useDiagramStore = defineStore('diagram', () => {
         m => m.sourceLifelineId !== id && m.targetLifelineId !== id
       )
     } else if (selectedElementType.value === 'message') {
-      messages.value = messages.value.filter(m => m.id !== id)
+      // Also delete linked return message if present
+      const msg = messages.value.find(m => m.id === id)
+      const linkedId = msg?.linkedReturnId
+      messages.value = messages.value.filter(m => m.id !== id && m.id !== linkedId)
     } else if (selectedElementType.value === 'fragment') {
       combinedFragments.value = combinedFragments.value.filter(f => f.id !== id)
     }
@@ -294,7 +397,7 @@ export const useDiagramStore = defineStore('diagram', () => {
   // Serialize / Deserialize
   function toJSON(): DiagramFile {
     return {
-      version: '1.0.0',
+      version: '1.1.0',
       metadata: JSON.parse(JSON.stringify(metadata.value)),
       lifelines: JSON.parse(JSON.stringify(lifelines.value)),
       messages: JSON.parse(JSON.stringify(messages.value)),
@@ -306,8 +409,23 @@ export const useDiagramStore = defineStore('diagram', () => {
   function loadFromJSON(data: DiagramFile) {
     metadata.value = data.metadata
     lifelines.value = data.lifelines
-    messages.value = data.messages
-    combinedFragments.value = data.combinedFragments
+    // Migrate: ensure linkedReturnId field exists
+    messages.value = data.messages.map(m => ({
+      ...m,
+      linkedReturnId: (m as any).linkedReturnId ?? null
+    }))
+    // Migrate v1.0.0 dividerRatio (number) → dividerRatios (number[])
+    combinedFragments.value = data.combinedFragments.map(frag => {
+      const f = frag as any
+      if (f.dividerRatios === undefined && f.dividerRatio !== undefined) {
+        return {
+          ...frag,
+          dividerRatios: f.dividerRatio > 0 ? [f.dividerRatio] : [],
+          dividerRatio: undefined
+        } as any
+      }
+      return frag
+    })
     viewState.value = data.viewState
     undoStack.value = []
     redoStack.value = []
@@ -338,7 +456,7 @@ export const useDiagramStore = defineStore('diagram', () => {
     selectedLifeline, selectedMessage, selectedFragment, elementCount,
     // Actions
     selectElement, clearSelection, setTool,
-    addLifeline, addMessage, addCombinedFragment,
+    addLifeline, addMessage, addCombinedFragment, addOperand, removeOperand,
     updateLifeline, updateMessage, moveMessageOrder, updateFragment,
     deleteSelected, undo, redo,
     setZoom, setAppZoom, setPan, moveLifeline,

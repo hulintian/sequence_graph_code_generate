@@ -21,9 +21,9 @@ const height = computed(() => props.fragment.height)
 
 const typeLabel = computed(() => props.fragment.type.toUpperCase())
 
-const dividerY = computed(() => {
-  if (props.fragment.type !== 'alt' || props.fragment.operands.length <= 1) return 0
-  return y.value + height.value * props.fragment.dividerRatio
+const dividerYs = computed(() => {
+  if (props.fragment.operands.length <= 1) return []
+  return props.fragment.dividerRatios.map(r => y.value + height.value * r)
 })
 </script>
 
@@ -79,29 +79,33 @@ const dividerY = computed(() => {
       font-family="monospace"
     >[{{ fragment.operands[0].guard }}]</text>
 
-    <!-- ALT dashed divider (draggable) -->
-    <template v-if="fragment.type === 'alt' && fragment.operands.length > 1">
-      <line
-        :x1="x" :y1="dividerY"
-        :x2="x + width" :y2="dividerY"
-        stroke="#666"
-        stroke-width="1"
-        stroke-dasharray="6,4"
-      />
-      <!-- Invisible wider hit area for dragging -->
-      <line
-        :x1="x" :y1="dividerY"
-        :x2="x + width" :y2="dividerY"
-        stroke="transparent"
-        stroke-width="10"
-        style="cursor: row-resize"
-      />
-      <text
-        :x="x + 8" :y="dividerY + 16"
-        fill="#e8a838"
-        font-size="11"
-        font-family="monospace"
-      >[{{ fragment.operands[1].guard }}]</text>
+    <!-- Dashed dividers between operands (ALT and PAR) -->
+    <template v-if="(fragment.type === 'alt' || fragment.type === 'par') && fragment.operands.length > 1">
+      <template v-for="(dY, di) in dividerYs" :key="'div-' + di">
+        <line
+          :x1="x" :y1="dY"
+          :x2="x + width" :y2="dY"
+          stroke="#666"
+          stroke-width="1"
+          stroke-dasharray="6,4"
+        />
+        <!-- Invisible wider hit area for dragging -->
+        <line
+          :x1="x" :y1="dY"
+          :x2="x + width" :y2="dY"
+          stroke="transparent"
+          stroke-width="10"
+          style="cursor: row-resize"
+        />
+        <!-- Guard condition for the operand below this divider -->
+        <text
+          v-if="fragment.operands[di + 1]"
+          :x="x + 8" :y="dY + 16"
+          fill="#e8a838"
+          font-size="11"
+          font-family="monospace"
+        >[{{ fragment.operands[di + 1].guard }}]</text>
+      </template>
     </template>
   </g>
 </template>

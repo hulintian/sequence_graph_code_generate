@@ -1,27 +1,37 @@
 <script setup lang="ts">
 import { useDiagramStore } from '../stores/diagram'
 import type { ToolType } from '../types/diagram'
+import { type Component, markRaw } from 'vue'
+import {
+  Pointer, User, Right, Promotion, Back,
+  CirclePlus, CircleClose,
+  Switch, Refresh, QuestionFilled, Operation, WarningFilled,
+  Delete, RefreshLeft, RefreshRight,
+} from '@element-plus/icons-vue'
 
 const store = useDiagramStore()
 
 interface ToolItem {
   id: ToolType
   label: string
-  icon: string
+  icon: Component
   group: 'element' | 'fragment' | 'action'
 }
 
 const tools: ToolItem[] = [
-  { id: 'select', label: '选择', icon: '⇢', group: 'action' },
-  { id: 'lifeline', label: '生命线', icon: '▯', group: 'element' },
-  { id: 'sync-message', label: '同步调用', icon: '→', group: 'element' },
-  { id: 'async-message', label: '异步调用', icon: '⇢', group: 'element' },
-  { id: 'return-message', label: '返回', icon: '⇠', group: 'element' },
-  { id: 'alt', label: 'alt', icon: '⎕', group: 'fragment' },
-  { id: 'loop', label: 'loop', icon: '↻', group: 'fragment' },
-  { id: 'opt', label: 'opt', icon: '?', group: 'fragment' },
-  { id: 'par', label: 'par', icon: '‖', group: 'fragment' },
-  { id: 'delete', label: '删除', icon: '✕', group: 'action' },
+  { id: 'select', label: '选择', icon: markRaw(Pointer), group: 'action' },
+  { id: 'lifeline', label: '生命线', icon: markRaw(User), group: 'element' },
+  { id: 'sync-message', label: '同步调用', icon: markRaw(Right), group: 'element' },
+  { id: 'async-message', label: '异步调用', icon: markRaw(Promotion), group: 'element' },
+  { id: 'return-message', label: '返回', icon: markRaw(Back), group: 'element' },
+  { id: 'create-message', label: '创建', icon: markRaw(CirclePlus), group: 'element' },
+  { id: 'destroy-message', label: '销毁', icon: markRaw(CircleClose), group: 'element' },
+  { id: 'alt', label: 'alt', icon: markRaw(Switch), group: 'fragment' },
+  { id: 'loop', label: 'loop', icon: markRaw(Refresh), group: 'fragment' },
+  { id: 'opt', label: 'opt', icon: markRaw(QuestionFilled), group: 'fragment' },
+  { id: 'par', label: 'par', icon: markRaw(Operation), group: 'fragment' },
+  { id: 'break', label: 'break', icon: markRaw(WarningFilled), group: 'fragment' },
+  { id: 'delete', label: '删除', icon: markRaw(Delete), group: 'action' },
 ]
 
 function selectTool(tool: ToolType) {
@@ -44,7 +54,7 @@ function selectTool(tool: ToolType) {
           :title="tool.label"
           @click="selectTool(tool.id)"
         >
-          <span class="tool-icon">{{ tool.icon }}</span>
+          <component :is="tool.icon" class="tool-icon" />
           <span class="tool-label">{{ tool.label }}</span>
         </button>
       </template>
@@ -59,7 +69,7 @@ function selectTool(tool: ToolType) {
           :title="tool.label"
           @click="selectTool(tool.id)"
         >
-          <span class="tool-icon">{{ tool.icon }}</span>
+          <component :is="tool.icon" class="tool-icon" />
           <span class="tool-label">{{ tool.label }}</span>
         </button>
       </template>
@@ -74,7 +84,7 @@ function selectTool(tool: ToolType) {
           :title="tool.label"
           @click="selectTool(tool.id)"
         >
-          <span class="tool-icon">{{ tool.icon }}</span>
+          <component :is="tool.icon" class="tool-icon" />
           <span class="tool-label">{{ tool.label }}</span>
         </button>
       </template>
@@ -83,12 +93,12 @@ function selectTool(tool: ToolType) {
     <div class="tool-section bottom-actions">
       <button class="tool-btn" title="撤销 (Ctrl+Z)" @click="store.undo()"
               :disabled="store.undoStack.length === 0">
-        <span class="tool-icon">↶</span>
+        <RefreshLeft class="tool-icon" />
         <span class="tool-label">撤销</span>
       </button>
       <button class="tool-btn" title="重做 (Ctrl+Y)" @click="store.redo()"
               :disabled="store.redoStack.length === 0">
-        <span class="tool-icon">↷</span>
+        <RefreshRight class="tool-icon" />
         <span class="tool-label">重做</span>
       </button>
     </div>
@@ -128,7 +138,7 @@ function selectTool(tool: ToolType) {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1px;
+  gap: 2px;
   padding: 6px 4px;
   background: none;
   border: 1px solid transparent;
@@ -155,8 +165,8 @@ function selectTool(tool: ToolType) {
 }
 
 .tool-icon {
-  font-size: 18px;
-  line-height: 1;
+  width: 18px;
+  height: 18px;
 }
 
 .tool-label {

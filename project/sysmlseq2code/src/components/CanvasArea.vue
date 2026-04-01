@@ -42,9 +42,10 @@ const resizeEdge = ref<'n' | 's' | 'e' | 'w' | null>(null)
 const resizeStartMouse = ref({ x: 0, y: 0 })
 const resizeStartRect = ref({ x: 0, y: 0, width: 0, height: 0 })
 
-// ALT divider drag state
+// Divider drag state (ALT/PAR with multiple operands)
 const isDraggingDivider = ref(false)
 const dividerFragmentId = ref<string | null>(null)
+const dividerDragIndex = ref(0)
 
 // Message Y positions
 const messageBaseY = 140
@@ -101,15 +102,30 @@ const activationBars = computed(() => {
         }
       }
 
+      // Self-call: offset the inner activation bar to the right
+      const isSelfCall = msg.sourceLifelineId === msg.targetLifelineId
+      const xOffset = isSelfCall ? 10 : 0
+
       bars.push({
         lifelineId: ll.id,
-        x: ll.position.x,
+        x: ll.position.x + xOffset,
         topY,
         bottomY,
       })
     }
   }
   return bars
+})
+
+// Destroy Y map — for each lifeline, find the Y of its first destroy message
+const destroyYMap = computed(() => {
+  const map: Record<string, number> = {}
+  for (const msg of store.messages) {
+    if (msg.type === 'destroy' && !map[msg.targetLifelineId]) {
+      map[msg.targetLifelineId] = messageYPositions.value[msg.id] ?? messageBaseY
+    }
+  }
+  return map
 })
 
 // Fragment layout — uses stored geometry from CombinedFragment
@@ -159,9 +175,19 @@ function findLifelineAtX(x: number): string | null {
   return null
 }
 
+// Given a fragment and a Y coordinate, determine which operand index the Y falls in
+function findOperandIndexAtY(frag: { y: number; height: number; dividerRatios: number[]; operands: any[] }, y: number): number {
+  if (frag.operands.length <= 1) return 0
+  for (let i = 0; i < frag.dividerRatios.length; i++) {
+    const divY = frag.y + frag.height * frag.dividerRatios[i]
+    if (y < divY) return i
+  }
+  return frag.operands.length - 1
+}
+
 function handleCanvasMouseDown(e: MouseEvent) {
-  if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
-    // Middle click or shift+click: start panning
+  if (e.button === 1 || e.button === 2 || (e.button === 0 && e.shiftKey)) {
+    // Middle click, right click, or shift+click: start panning
     isPanning.value = true
     panStart.value = { x: e.clientX - store.viewState.panX, y: e.clientY - store.viewState.panY }
     return
@@ -179,14 +205,14 @@ function handleCanvasMouseDown(e: MouseEvent) {
     return
   }
 
-  if (tool === 'alt' || tool === 'loop' || tool === 'opt' || tool === 'par') {
+  if (tool === 'alt' || tool === 'loop' || tool === 'opt' || tool === 'par' || tool === 'break') {
     isDrawingFragment.value = true
     fragmentDrawStart.value = { x: pt.x, y: pt.y }
     fragmentDrawEnd.value = { x: pt.x, y: pt.y }
     return
   }
 
-  if (tool === 'sync-message' || tool === 'async-message' || tool === 'return-message') {
+  if (tool === 'sync-message' || tool === 'async-message' || tool === 'return-message' || tool === 'create-message' || tool === 'destroy-message') {
     const lifelineId = findLifelineAtX(pt.x)
     if (lifelineId) {
       isDrawingMessage.value = true
@@ -238,14 +264,17 @@ function handleCanvasMouseDown(e: MouseEvent) {
 
       if (!inside) continue
 
-      // ALT divider drag check
-      if (fl.fragment.type === 'alt' && fl.fragment.operands.length > 1) {
-        const divY = fy + fh * fl.fragment.dividerRatio
-        if (Math.abs(pt.y - divY) < edgeThreshold && pt.x >= fx && pt.x <= fx + fw) {
-          isDraggingDivider.value = true
-          dividerFragmentId.value = fl.fragment.id
-          store.selectElement(fl.fragment.id, 'fragment')
-          return
+      // Divider drag check (ALT and PAR with multiple operands)
+      if ((fl.fragment.type === 'alt' || fl.fragment.type === 'par') && fl.fragment.operands.length > 1) {
+        for (let di = 0; di < fl.fragment.dividerRatios.length; di++) {
+          const divY = fy + fh * fl.fragment.dividerRatios[di]
+          if (Math.abs(pt.y - divY) < edgeThreshold && pt.x >= fx && pt.x <= fx + fw) {
+            isDraggingDivider.value = true
+            dividerFragmentId.value = fl.fragment.id
+            dividerDragIndex.value = di
+            store.selectElement(fl.fragment.id, 'fragment')
+            return
+          }
         }
       }
 
@@ -333,8 +362,12 @@ function handleCanvasMouseMove(e: MouseEvent) {
     const pt = getSvgPoint(e)
     const frag = store.combinedFragments.find(f => f.id === dividerFragmentId.value)
     if (frag) {
-      const ratio = Math.max(0.1, Math.min(0.9, (pt.y - frag.y) / frag.height))
-      frag.dividerRatio = ratio
+      const idx = dividerDragIndex.value
+      const ratio = (pt.y - frag.y) / frag.height
+      // Clamp between previous divider + 0.05 and next divider - 0.05
+      const minR = idx > 0 ? frag.dividerRatios[idx - 1] + 0.05 : 0.05
+      const maxR = idx < frag.dividerRatios.length - 1 ? frag.dividerRatios[idx + 1] - 0.05 : 0.95
+      frag.dividerRatios[idx] = Math.max(minR, Math.min(maxR, ratio))
       store.isDirty = true
     }
     return
@@ -375,7 +408,7 @@ function handleCanvasMouseUp(e: MouseEvent) {
       }
     }
 
-    const fragType = store.activeTool as 'alt' | 'loop' | 'opt' | 'par'
+    const fragType = store.activeTool as 'alt' | 'loop' | 'opt' | 'par' | 'break'
     const fragRect = { x: x1, y: y1, width: x2 - x1, height: y2 - y1 }
     store.addCombinedFragment(fragType, selectedMsgIds, fragRect)
     // Link messages inside the rectangle to this fragment
@@ -418,20 +451,34 @@ function handleCanvasMouseUp(e: MouseEvent) {
     const targetId = findLifelineAtX(pt.x)
     if (targetId) {
       const msgType = store.activeTool === 'async-message' ? 'async'
-        : store.activeTool === 'return-message' ? 'return' : 'sync'
+        : store.activeTool === 'return-message' ? 'return'
+        : store.activeTool === 'create-message' ? 'create'
+        : store.activeTool === 'destroy-message' ? 'destroy'
+        : 'sync'
       const drawY = messageDrawStart.value.y
-      store.addMessage(messageDrawStart.value.lifelineId, targetId, msgType)
+      store.addMessage(messageDrawStart.value.lifelineId, targetId, msgType as any)
       // Set customY to where the user drew the line
       const newMsg = store.messages[store.messages.length - 1]
       newMsg.customY = Math.max(messageBaseY, drawY)
-      // Auto-assign parentFragmentId based on geometric containment
+      // Create message: move target lifeline header to this Y position
+      if (msgType === 'create') {
+        const targetLl = store.lifelines.find(l => l.id === targetId)
+        if (targetLl) {
+          targetLl.position.y = Math.max(messageBaseY - 20, drawY - 20)
+        }
+      }
+      // Auto-assign parentFragmentId and correct operand based on geometric containment
       const msgY = newMsg.customY
       for (const frag of store.combinedFragments) {
         if (msgY >= frag.y && msgY <= frag.y + frag.height &&
             pt.x >= frag.x && pt.x <= frag.x + frag.width) {
           newMsg.parentFragmentId = frag.id
-          if (frag.operands.length > 0 && !frag.operands[0].messageIds.includes(newMsg.id)) {
-            frag.operands[0].messageIds.push(newMsg.id)
+          // Determine which operand this Y falls into based on divider positions
+          const operandIdx = findOperandIndexAtY(frag, msgY)
+          if (operandIdx >= 0 && operandIdx < frag.operands.length) {
+            if (!frag.operands[operandIdx].messageIds.includes(newMsg.id)) {
+              frag.operands[operandIdx].messageIds.push(newMsg.id)
+            }
           }
           break
         }
@@ -505,13 +552,14 @@ const drawStartLifeline = computed(() => {
       @mousemove="handleCanvasMouseMove"
       @mouseup="handleCanvasMouseUp"
       @wheel="handleWheel"
+      @contextmenu.prevent
       :style="{
         cursor: isPanning ? 'grabbing'
           : isResizingFragment ? (resizeEdge === 'n' || resizeEdge === 's' ? 'ns-resize' : 'ew-resize')
           : isDraggingDivider ? 'row-resize'
           : store.activeTool === 'lifeline' ? 'crosshair'
-          : (store.activeTool.endsWith('-message') || store.activeTool === 'sync-message') ? 'crosshair'
-          : ['alt','loop','opt','par'].includes(store.activeTool) ? 'crosshair'
+          : store.activeTool.endsWith('-message') ? 'crosshair'
+          : ['alt','loop','opt','par','break'].includes(store.activeTool) ? 'crosshair'
           : isDraggingLifeline ? 'ew-resize'
           : isDrawingFragment ? 'crosshair'
           : 'default'
@@ -534,6 +582,7 @@ const drawStartLifeline = computed(() => {
           :key="ll.id"
           :lifeline="ll"
           :canvasHeight="canvasHeight"
+          :destroyY="destroyYMap[ll.id] ?? null"
         />
 
         <!-- Activation bars (execution specifications) -->

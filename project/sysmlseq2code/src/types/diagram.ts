@@ -32,6 +32,7 @@ export interface Message {
   returnType: string
   guard: string
   parentFragmentId: string | null
+  linkedReturnId: string | null
 }
 
 export interface FragmentOperand {
@@ -50,8 +51,8 @@ export interface CombinedFragment {
   y: number
   width: number
   height: number
-  // For ALT: ratio (0~1) of divider position within the fragment height
-  dividerRatio: number
+  // Ratios (0~1) for divider positions between operands (length = operands.length - 1)
+  dividerRatios: number[]
 }
 
 export interface ViewState {
@@ -98,10 +99,13 @@ export type ToolType =
   | 'sync-message'
   | 'async-message'
   | 'return-message'
+  | 'create-message'
+  | 'destroy-message'
   | 'alt'
   | 'loop'
   | 'opt'
   | 'par'
+  | 'break'
   | 'delete'
 
 export type ElementType = 'lifeline' | 'message' | 'fragment' | null

@@ -6,6 +6,12 @@
   "permissions": [
     "core:default",
     "core:webview:allow-set-webview-zoom",
-    "opener:default"
+    "opener:default",
+    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "dialog:allow-ask",
+    "dialog:allow-confirm",
+    "dialog:allow-message"
   ]
 }

@@ -108,6 +108,7 @@ fn preview_code(diagram_json: String) -> Result<Vec<PreviewFile>, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             greet,
             save_diagram,
