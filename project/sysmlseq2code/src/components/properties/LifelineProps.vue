@@ -1,14 +1,50 @@
 <script setup lang="ts">
 import { useDiagramStore } from '../../stores/diagram'
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 const store = useDiagramStore()
 const lifeline = computed(() => store.selectedLifeline)
 
-function updateName(e: Event) {
-  const val = (e.target as HTMLInputElement).value
-  if (lifeline.value) {
-    store.updateLifeline(lifeline.value.id, { name: val })
+// Track name locally for real-time input
+const nameInput = ref('')
+const undoPushed = ref(false)
+
+watch(lifeline, (ll) => {
+  if (ll) {
+    nameInput.value = ll.name
+    undoPushed.value = false
+  }
+}, { immediate: true })
+
+// Sync store → local when name changes externally (e.g. undo)
+watch(() => lifeline.value?.name, (newName) => {
+  if (newName !== undefined && newName !== nameInput.value) {
+    nameInput.value = newName
+  }
+})
+
+const isDuplicate = computed(() =>
+  lifeline.value
+    ? store.isLifelineNameDuplicate(nameInput.value, lifeline.value.id)
+    : false
+)
+
+function onNameInput() {
+  if (!lifeline.value) return
+  if (!undoPushed.value) {
+    store.pushUndo()
+    undoPushed.value = true
+  }
+  store.renameLifeline(lifeline.value.id, nameInput.value)
+}
+
+function onNameBlur() {
+  if (isDuplicate.value && lifeline.value) {
+    // Revert
+    store.undo()
+    undoPushed.value = false
+  } else {
+    undoPushed.value = false
   }
 }
 
@@ -44,7 +80,8 @@ function updateNamespace(e: Event) {
 
     <label>
       <span>名称</span>
-      <input type="text" :value="lifeline.name" @change="updateName" />
+      <input type="text" v-model="nameInput" @input="onNameInput" @blur="onNameBlur" />
+      <span v-if="isDuplicate" class="dup-warning">名称已存在，与其他生命线重复</span>
     </label>
 
     <label>
@@ -114,6 +151,11 @@ input, select {
 
 input:focus, select:focus {
   border-color: #4b7bff;
+}
+
+.dup-warning {
+  color: #e05555;
+  font-size: 11px;
 }
 
 .info-row {

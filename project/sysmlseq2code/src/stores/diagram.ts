@@ -394,6 +394,20 @@ export const useDiagramStore = defineStore('diagram', () => {
     }
   }
 
+  /** Lightweight rename — updates name without pushing undo on every keystroke.
+   *  Call pushUndo() once before starting the rename session. */
+  function renameLifeline(id: string, name: string) {
+    const ll = lifelines.value.find(l => l.id === id)
+    if (ll) {
+      ll.name = name
+      isDirty.value = true
+    }
+  }
+
+  function isLifelineNameDuplicate(name: string, excludeId?: string): boolean {
+    return lifelines.value.some(l => l.id !== excludeId && l.name === name)
+  }
+
   // Serialize / Deserialize
   function toJSON(): DiagramFile {
     return {
@@ -455,11 +469,11 @@ export const useDiagramStore = defineStore('diagram', () => {
     // Computed
     selectedLifeline, selectedMessage, selectedFragment, elementCount,
     // Actions
-    selectElement, clearSelection, setTool,
+    pushUndo, selectElement, clearSelection, setTool,
     addLifeline, addMessage, addCombinedFragment, addOperand, removeOperand,
     updateLifeline, updateMessage, moveMessageOrder, updateFragment,
     deleteSelected, undo, redo,
-    setZoom, setAppZoom, setPan, moveLifeline,
+    setZoom, setAppZoom, setPan, moveLifeline, renameLifeline, isLifelineNameDuplicate,
     toJSON, loadFromJSON, newDiagram,
   }
 })
